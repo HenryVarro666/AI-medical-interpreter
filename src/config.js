@@ -49,6 +49,15 @@ export const config = {
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MIN || '10', 10) * 60_000,
   rateLimitMaxCalls: parseInt(process.env.RATE_LIMIT_MAX_CALLS || '10', 10),
 
+  // Post-ASR transcript cleaning via GPT-4o-mini. Fixes code-switching errors.
+  // Adds ~200-400ms latency to transcript display (audio is unaffected).
+  enableTranscriptCleaning: process.env.ENABLE_TRANSCRIPT_CLEANING === 'true',
+
+  // Whisper language hint for ASR (ISO 639-1). Helps with mixed-language
+  // recognition by biasing toward the expected primary language.
+  // 'zh' for Chinese-dominant, 'en' for English-dominant, empty for auto-detect.
+  whisperLanguageHint: process.env.WHISPER_LANGUAGE_HINT || '',
+
   // Session mode: 'translator' (default) or 'intake'
   defaultMode: process.env.DEFAULT_MODE || 'translator',
 };

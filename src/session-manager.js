@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { config } from './config.js';
 import { logAudit } from './audit-logger.js';
 import { generateMedicalDocument } from './doc-generator.js';
+import { cleanTranscript } from './transcript-cleaner.js';
 
 class SessionManager extends EventEmitter {
   constructor() {
@@ -53,6 +54,19 @@ class SessionManager extends EventEmitter {
       if (client.readyState === 1) {
         client.send(message);
       }
+    }
+
+    if (entry.role === 'caller') {
+      cleanTranscript(entry.text, session.transcripts).then(cleaned => {
+        if (cleaned !== entry.text) {
+          transcript.text = cleaned;
+          transcript.rawText = entry.text;
+          this._broadcast(sessionId, {
+            type: 'transcript_corrected',
+            data: { id: transcript.id, text: cleaned },
+          });
+        }
+      });
     }
   }
 

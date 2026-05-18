@@ -80,6 +80,9 @@ async function connectToSession(sessionId) {
       case 'transcript_delta':
         appendDelta(msg.data);
         break;
+      case 'transcript_corrected':
+        correctTranscriptLine(msg.data);
+        break;
       case 'document_error':
         showDocumentError(msg.data.error);
         break;
@@ -164,11 +167,17 @@ function addTranscriptLine(entry) {
     <div class="text">${escapeHtml(entry.text)}</div>
   `;
 
+  div.dataset.transcriptId = entry.id;
   feed.appendChild(div);
 
   if (autoScroll) {
     feed.scrollTop = feed.scrollHeight;
   }
+}
+
+function correctTranscriptLine(data) {
+  const el = document.querySelector(`[data-transcript-id="${data.id}"] .text`);
+  if (el) el.textContent = data.text;
 }
 
 let activeDeltaEl = null;

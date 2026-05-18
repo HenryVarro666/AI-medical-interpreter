@@ -1,0 +1,27 @@
+{
+  "name": "ai-phone-call-translator",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Real-time AI phone-call translator built on Twilio Media Streams + OpenAI Realtime API. Designed with a pluggable TTS layer so voice cloning (ElevenLabs / custom) can be added later.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "twilio",
+    "openai",
+    "realtime",
+    "voice",
+    "translation",
+    "interpreter"
+  ],
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

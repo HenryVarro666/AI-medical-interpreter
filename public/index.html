@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Medical Interpreter Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1><span>Medical</span> Interpreter Dashboard</h1>
+    <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+  </div>
+
+  <!-- Session selector bar -->
+  <div class="session-bar">
+    <label for="session-select">Session:</label>
+    <select id="session-select">
+      <option value="">-- Select a session --</option>
+    </select>
+    <button id="refresh-btn" class="btn">Refresh</button>
+
+    <div class="session-info">
+      <span><span id="status-dot" class="status-dot"></span> <span id="status-label">--</span></span>
+      <span class="mode-badge" id="session-mode">--</span>
+      <span>ID: <strong id="session-id">--</strong></span>
+      <span id="lang-pair">--</span>
+      <span>Duration: <strong id="duration">00:00</strong></span>
+    </div>
+  </div>
+
+  <!-- No session selected -->
+  <div id="no-session" class="no-session">
+    <h2>No Active Session</h2>
+    <p>Call the Twilio phone number to start a medical interpretation session. The session will appear in the dropdown above.</p>
+  </div>
+
+  <!-- Session view (hidden until a session is selected) -->
+  <div id="session-view" style="display: none;">
+    <div class="main">
+
+      <!-- Live Transcript Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Live Transcript</h2>
+        </div>
+        <div id="transcript-feed" class="transcript-feed">
+          <div class="transcript-empty">Waiting for speech...</div>
+        </div>
+      </div>
+
+      <!-- Medical Document Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Medical Documentation (SOAP Note)</h2>
+          <div class="actions">
+            <button id="copy-btn" class="btn">Copy</button>
+          </div>
+        </div>
+        <div id="document-content" class="document-panel">
+          <div class="document-empty">Medical note will appear here after the call ends.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

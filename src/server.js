@@ -62,6 +62,48 @@ app.get('/api/sessions/:id/document', (req, res) => {
   res.json(session.document);
 });
 
+// --- Demo: seed a mock session for local preview ---------------------------
+app.post('/api/demo', async (_req, res) => {
+  const session = sessionManager.createSession('demo-stream', 'demo-call', 'intake');
+
+  const lines = [
+    { role: 'translation', text: 'Hello, I am the medical intake specialist. May I have your full name and date of birth please?' },
+    { role: 'caller', text: '你好，我叫张伟，1985年3月15日出生。' },
+    { role: 'translation', text: 'Thank you, Zhang Wei. What brings you in today? What is the main reason for your call?' },
+    { role: 'caller', text: '我头疼，已经三天了，越来越严重。' },
+    { role: 'translation', text: 'I see, a headache for three days that is getting worse. On a scale of 1 to 10, how would you rate the pain right now?' },
+    { role: 'caller', text: '大概7分吧，就是持续性的钝痛，主要在前额和太阳穴。' },
+    { role: 'translation', text: 'A constant dull pain at 7 out of 10, mainly in the forehead and temples. Are you currently taking any medications for this or anything else?' },
+    { role: 'caller', text: '我吃了布洛芬，400毫克，一天吃了两次，但是没什么效果。我平时还在吃降压药，氨氯地平5毫克，每天一次。' },
+    { role: 'translation', text: 'Understood — ibuprofen 400mg twice daily with no relief, and amlodipine 5mg daily for blood pressure. Do you have any allergies to medications, foods, or other substances?' },
+    { role: 'caller', text: '我对青霉素过敏，会起皮疹。对其他的不过敏。' },
+    { role: 'translation', text: 'Penicillin allergy causing rash, noted. Any other ongoing medical conditions besides high blood pressure?' },
+    { role: 'caller', text: '高血压，已经五年了。还有轻度脂肪肝，去年体检查出来的。' },
+    { role: 'translation', text: 'Hypertension for 5 years and mild fatty liver diagnosed last year. Have you had any surgeries or hospitalizations?' },
+    { role: 'caller', text: '没有做过手术，也没有住过院。' },
+    { role: 'translation', text: 'No surgeries or hospitalizations. Any significant medical conditions in your immediate family?' },
+    { role: 'caller', text: '我父亲有糖尿病，母亲有高血压。' },
+    { role: 'translation', text: 'Father with diabetes, mother with hypertension. Do you smoke, drink alcohol, or use any other substances?' },
+    { role: 'caller', text: '不抽烟，偶尔喝点啤酒，大概一周一两次。' },
+    { role: 'translation', text: 'Non-smoker, occasional beer 1-2 times per week. Any other symptoms along with the headache — nausea, vision changes, dizziness, fever, neck stiffness?' },
+    { role: 'caller', text: '有一点恶心，但没有吐。视力正常，没有发烧。' },
+    { role: 'translation', text: 'Mild nausea without vomiting, no vision changes, no fever. Let me confirm what I have: Zhang Wei, born March 15 1985, presenting with a 3-day worsening headache rated 7/10, constant dull pain in the forehead and temples, with mild nausea. Current medications are ibuprofen 400mg BID and amlodipine 5mg daily. Penicillin allergy. History of hypertension and fatty liver. Is that all correct?' },
+    { role: 'caller', text: '对的，都对。' },
+    { role: 'translation', text: 'Thank you, Zhang Wei. The doctor will review all of this and be with you shortly. Is there anything else you would like the doctor to know?' },
+    { role: 'caller', text: '没有了，谢谢。' },
+    { role: 'translation', text: 'You are welcome. Take care and the doctor will see you soon.' },
+  ];
+
+  for (const line of lines) {
+    sessionManager.addTranscript(session.id, line);
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  await sessionManager.endSession(session.id);
+
+  res.json({ sessionId: session.id, message: 'Demo session created. Open the dashboard to view.' });
+});
+
 // --- HTTP server + WebSocket servers ---------------------------------------
 const server = createServer(app);
 

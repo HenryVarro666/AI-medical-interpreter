@@ -4,6 +4,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 let ws = null;
 let currentSessionId = null;
 let autoScroll = true;
+let restLoaded = false;
 
 // --- Session list ----------------------------------------------------------
 
@@ -39,7 +40,7 @@ function renderSessionList(sessions) {
 
 // --- WebSocket connection --------------------------------------------------
 
-function connectToSession(sessionId) {
+async function connectToSession(sessionId) {
   if (ws) { ws.close(); ws = null; }
   if (!sessionId) {
     currentSessionId = null;
@@ -48,11 +49,14 @@ function connectToSession(sessionId) {
   }
 
   currentSessionId = sessionId;
+  restLoaded = false;
   showSessionView();
   clearTranscript();
   clearDocument();
-  setConnectionStatus('connecting');
 
+  await loadSessionViaREST(sessionId);
+
+  setConnectionStatus('connecting');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/dashboard/ws?sessionId=${sessionId}`);
 
@@ -89,15 +93,33 @@ function connectToSession(sessionId) {
     setConnectionStatus('disconnected');
     setTimeout(() => {
       if (currentSessionId === sessionId) connectToSession(sessionId);
-    }, 3000);
+    }, 10000);
   };
 
   ws.onerror = () => setConnectionStatus('disconnected');
 }
 
+async function loadSessionViaREST(sessionId) {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`);
+    if (!res.ok) return;
+    const state = await res.json();
+    updateSessionInfo(state);
+    for (const t of state.transcripts) {
+      addTranscriptLine(t);
+    }
+    updateSessionStatus({ status: state.status, endedAt: state.endedAt });
+    if (state.hasDocument) {
+      fetchAndRenderDocument(sessionId);
+    }
+    restLoaded = true;
+  } catch { /* WS will handle it */ }
+}
+
 // --- Handlers --------------------------------------------------------------
 
 function handleSessionState(state) {
+  if (restLoaded) return;
   updateSessionInfo(state);
 
   for (const t of state.transcripts) {
@@ -377,15 +399,16 @@ $('#refresh-btn')?.addEventListener('click', fetchSessions);
 
 setInterval(fetchSessions, 5000);
 
-fetchSessions().then(sessions => {
+(async function init() {
+  const sessions = await fetchSessions();
   const params = new URLSearchParams(location.search);
   const id = params.get('sessionId');
   if (id) {
     $('#session-select').value = id;
-    connectToSession(id);
+    await connectToSession(id);
   } else if (sessions.length > 0) {
     const active = sessions.find(s => s.status === 'active') || sessions[0];
     $('#session-select').value = active.id;
-    connectToSession(active.id);
+    await connectToSession(active.id);
   }
-});
+})();

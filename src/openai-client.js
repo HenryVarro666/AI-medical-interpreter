@@ -91,7 +91,6 @@ export class OpenAIRealtimeClient extends EventEmitter {
       this.ws = new WebSocket(url, {
         headers: {
           Authorization: `Bearer ${config.openaiApiKey}`,
-          'OpenAI-Beta': 'realtime=v1',
         },
       });
 
@@ -174,22 +173,28 @@ export class OpenAIRealtimeClient extends EventEmitter {
   _configureConversationSession() {
     const isIntake = this.mode === 'intake';
     const sessionConfig = {
-      modalities: ['text', 'audio'],
+      type: 'realtime',
       instructions: isIntake ? INTAKE_INSTRUCTIONS : TRANSLATOR_INSTRUCTIONS,
-      voice: config.voice,
-      input_audio_format: 'g711_ulaw',
-      output_audio_format: 'g711_ulaw',
-      input_audio_transcription: {
-        model: 'whisper-1',
-        language: config.whisperLanguageHint || undefined,
+      output_modalities: ['audio'],
+      audio: {
+        input: {
+          format: { type: 'audio/pcmu' },
+          transcription: {
+            model: 'gpt-realtime-whisper',
+            language: config.whisperLanguageHint || undefined,
+          },
+          turn_detection: {
+            type: 'server_vad',
+            threshold: isIntake ? 0.5 : 0.65,
+            prefix_padding_ms: 300,
+            silence_duration_ms: isIntake ? 1200 : 700,
+          },
+        },
+        output: {
+          format: { type: 'audio/pcmu' },
+          voice: config.voice,
+        },
       },
-      turn_detection: {
-        type: 'server_vad',
-        threshold: isIntake ? 0.5 : 0.65,
-        prefix_padding_ms: 300,
-        silence_duration_ms: isIntake ? 1200 : 700,
-      },
-      temperature: isIntake ? 0.7 : 0.6,
     };
 
     if (this.model.includes('gpt-realtime-2')) {

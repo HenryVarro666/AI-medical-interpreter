@@ -33,6 +33,12 @@ app.get('/health', (_req, res) => res.json({
 app.post('/twilio/incoming-call', handleIncomingCall);
 app.get('/twilio/incoming-call', handleIncomingCall);
 
+// --- Public host -----------------------------------------------------------
+app.get('/api/public-host', (req, res) => {
+  const host = config.publicHost || req.headers['x-forwarded-host'] || req.headers.host;
+  res.json({ host });
+});
+
 // --- Models API ------------------------------------------------------------
 app.get('/api/models', (_req, res) => {
   res.json({
@@ -135,11 +141,30 @@ app.post('/api/demo', async (_req, res) => {
 // --- HTTP server + WebSocket servers ---------------------------------------
 const server = createServer(app);
 
-const twilioWss = new WebSocketServer({ server, path: '/twilio/media-stream' });
+const twilioWss = new WebSocketServer({ noServer: true });
 twilioWss.on('connection', handleMediaStream);
 
-const dashboardWss = new WebSocketServer({ server, path: '/dashboard/ws' });
+const dashboardWss = new WebSocketServer({ noServer: true });
 dashboardWss.on('connection', handleDashboardConnection);
+
+server.on('upgrade', (req, socket, head) => {
+  const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+
+  // Strip permessage-deflate to prevent ngrok compression conflicts
+  delete req.headers['sec-websocket-extensions'];
+
+  if (pathname === '/twilio/media-stream') {
+    twilioWss.handleUpgrade(req, socket, head, (ws) => {
+      twilioWss.emit('connection', ws, req);
+    });
+  } else if (pathname === '/dashboard/ws') {
+    dashboardWss.handleUpgrade(req, socket, head, (ws) => {
+      dashboardWss.emit('connection', ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 server.listen(config.port, () => {
   console.log('─'.repeat(60));

@@ -125,6 +125,13 @@ export class OpenAIRealtimeClient extends EventEmitter {
     }
     this.ready = true;
     console.log(`[openai] session configured: model=${this.model} mode=${this.mode}`);
+
+    if (this.mode === 'intake' && !this.isTranslate) {
+      setTimeout(() => {
+        this._send({ type: 'response.create' });
+        console.log('[openai] intake: triggered initial greeting');
+      }, 500);
+    }
   }
 
   _configureTranslateSession() {

@@ -10,6 +10,7 @@ import { handleDashboardConnection } from './dashboard-handler.js';
 import { sessionManager } from './session-manager.js';
 import { logAudit } from './audit-logger.js';
 import { getCallStats } from './call-guard.js';
+import { getAvailableModels } from './openai-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +31,17 @@ app.get('/health', (_req, res) => res.json({
 // --- Twilio webhooks -------------------------------------------------------
 app.post('/twilio/incoming-call', handleIncomingCall);
 app.get('/twilio/incoming-call', handleIncomingCall);
+
+// --- Models API ------------------------------------------------------------
+app.get('/api/models', (_req, res) => {
+  res.json({
+    available: getAvailableModels(),
+    defaults: {
+      translator: config.openaiTranslateModel,
+      intake: config.openaiModel,
+    },
+  });
+});
 
 // --- Dashboard REST API ----------------------------------------------------
 app.get('/api/sessions', (_req, res) => {

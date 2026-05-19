@@ -25,7 +25,8 @@ export function handleIncomingCall(req, res) {
   }
 
   const mode = req.query?.mode || req.body?.mode || config.defaultMode;
-  const wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}`;
+  const model = req.query?.model || req.body?.model || '';
+  const wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}&model=${model}`;
 
   const greeting = mode === 'intake'
     ? 'Connecting you to the medical intake system. A specialist will collect your information.'
@@ -48,6 +49,7 @@ export function handleMediaStream(ws, req) {
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const mode = url.searchParams.get('mode') || config.defaultMode;
+  const modelOverride = url.searchParams.get('model') || null;
 
   let streamSid = null;
   let callSid = null;
@@ -95,7 +97,7 @@ export function handleMediaStream(ws, req) {
         registerCall(callSid || streamSid, 'unknown');
         session = sessionManager.createSession(streamSid, callSid, mode);
 
-        openai = new OpenAIRealtimeClient(mode);
+        openai = new OpenAIRealtimeClient(mode, modelOverride);
         openai.on('audio', forwardAudio);
         openai.on('transcript', (entry) => {
           sessionManager.addTranscript(session.id, entry);

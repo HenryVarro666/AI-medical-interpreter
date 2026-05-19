@@ -342,12 +342,7 @@ export class OpenAIRealtimeClient extends EventEmitter {
 
   sendAudio(audioBase64) {
     if (this.aiSpeaking) return;
-
-    if (this.isTranslate || this.isWhisper) {
-      this._send({ type: 'input_audio_buffer.append', audio: audioBase64 });
-    } else {
-      this._send({ type: 'input_audio_buffer.append', audio: audioBase64 });
-    }
+    this._send({ type: 'session.input_audio_buffer.append', audio: audioBase64 });
   }
 
   _send(obj) {

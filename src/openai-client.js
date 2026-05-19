@@ -1,26 +1,3 @@
-/**
- * Thin wrapper around the OpenAI Realtime API WebSocket.
- *
- * Lifecycle:
- *   new OpenAIRealtimeClient()
- *      -> connect()          // opens WS + sends session.update
- *      -> sendAudio(b64)     // push μ-law audio from Twilio
- *      -> on('audio', ...)   // receive μ-law audio to send BACK to Twilio
- *      -> on('speech_started', ...)  // barge-in: user started talking again
- *      -> close()
- *
- * Events we care about from OpenAI:
- *   session.created / session.updated          — handshake ok
- *   input_audio_buffer.speech_started          — server VAD detected speech
- *   input_audio_buffer.speech_stopped          — VAD detected end of turn
- *   response.audio.delta                       — base64 μ-law chunk of TTS
- *   response.audio_transcript.done             — full text of what we spoke
- *   conversation.item.input_audio_transcription.completed
- *                                              — what the user said (debug)
- *   error                                      — anything went wrong
- *
- * Docs: https://platform.openai.com/docs/guides/realtime
- */
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 
@@ -30,19 +7,45 @@ import { INTAKE_INSTRUCTIONS } from './intake-prompts.js';
 
 const AVAILABLE_MODELS = {
   'gpt-4o-realtime':          'gpt-4o-realtime-preview-2024-12-17',
+  'gpt-realtime':             'gpt-realtime',
   'gpt-realtime-2':           'gpt-realtime-2',
   'gpt-realtime-translate':   'gpt-realtime-translate',
   'gpt-realtime-whisper':     'gpt-realtime-whisper',
 };
 
+const LANG_CODES = {
+  'chinese': 'zh', 'english': 'en', 'spanish': 'es', 'french': 'fr',
+  'german': 'de', 'japanese': 'ja', 'korean': 'ko', 'portuguese': 'pt',
+  'russian': 'ru', 'italian': 'it', 'hindi': 'hi', 'indonesian': 'id',
+  'vietnamese': 'vi',
+};
+
 function resolveModel(mode, modelOverride) {
-  if (modelOverride) {
-    return AVAILABLE_MODELS[modelOverride] || modelOverride;
-  }
-  if (mode === 'translator') {
-    return config.openaiTranslateModel || config.openaiModel;
-  }
+  if (modelOverride) return AVAILABLE_MODELS[modelOverride] || modelOverride;
+  if (mode === 'translator' && config.openaiTranslateModel) return config.openaiTranslateModel;
   return config.openaiModel;
+}
+
+function isTranslateModel(model) {
+  return model.includes('translate');
+}
+
+function isWhisperModel(model) {
+  return model.includes('whisper');
+}
+
+function buildEndpoint(model) {
+  if (isTranslateModel(model)) {
+    return `wss://api.openai.com/v1/realtime/translations?model=${encodeURIComponent(model)}`;
+  }
+  if (isWhisperModel(model)) {
+    return `wss://api.openai.com/v1/realtime/transcriptions?model=${encodeURIComponent(model)}`;
+  }
+  return `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+}
+
+function langCode(langName) {
+  return LANG_CODES[langName.toLowerCase()] || langName.toLowerCase().slice(0, 2);
 }
 
 export function getAvailableModels() {
@@ -56,16 +59,15 @@ export class OpenAIRealtimeClient extends EventEmitter {
     this.ready = false;
     this.mode = mode;
     this.model = resolveModel(mode, modelOverride);
+    this.isTranslate = isTranslateModel(this.model);
+    this.isWhisper = isWhisperModel(this.model);
 
-    // Echo suppression: while the AI is actively speaking, incoming audio
-    // is almost always our own TTS bleeding back through the caller's mic
-    // (common on phones without echo cancellation). Dropping those chunks
-    // prevents the AI from "hearing itself" and interrupting its own output.
     this.aiSpeaking = false;
     this._aiSpeakingReleaseTimer = null;
   }
 
   _markAiSpeaking() {
+    if (this.isTranslate) return;
     this.aiSpeaking = true;
     if (this._aiSpeakingReleaseTimer) {
       clearTimeout(this._aiSpeakingReleaseTimer);
@@ -74,8 +76,6 @@ export class OpenAIRealtimeClient extends EventEmitter {
   }
 
   _markAiDoneSpeaking() {
-    // Hold the gate open for a short tail to catch trailing echo after
-    // the AI's last audio chunk has finished playing through the phone.
     if (this._aiSpeakingReleaseTimer) clearTimeout(this._aiSpeakingReleaseTimer);
     this._aiSpeakingReleaseTimer = setTimeout(() => {
       this.aiSpeaking = false;
@@ -84,8 +84,9 @@ export class OpenAIRealtimeClient extends EventEmitter {
   }
 
   connect() {
-    const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.model)}`;
-    console.log(`[openai] connecting to model: ${this.model}`);
+    const url = buildEndpoint(this.model);
+    console.log(`[openai] connecting: ${this.model} (${this.isTranslate ? 'translate' : this.isWhisper ? 'whisper' : 'conversation'})`);
+
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(url, {
         headers: {
@@ -117,31 +118,85 @@ export class OpenAIRealtimeClient extends EventEmitter {
   }
 
   _configureSession() {
-    const isIntake = this.mode === 'intake';
+    if (this.isTranslate) {
+      this._configureTranslateSession();
+    } else if (this.isWhisper) {
+      this._configureWhisperSession();
+    } else {
+      this._configureConversationSession();
+    }
+    this.ready = true;
+    console.log(`[openai] session configured: model=${this.model} mode=${this.mode}`);
+  }
 
+  _configureTranslateSession() {
+    const outputLang = langCode(config.speakerBLang);
     this._send({
       type: 'session.update',
       session: {
-        modalities: ['text', 'audio'],
-        instructions: isIntake ? INTAKE_INSTRUCTIONS : TRANSLATOR_INSTRUCTIONS,
-        voice: config.voice,
-        input_audio_format: 'g711_ulaw',
-        output_audio_format: 'g711_ulaw',
-        input_audio_transcription: {
-          model: 'whisper-1',
-          language: config.whisperLanguageHint || undefined,
+        audio: {
+          input: {
+            noise_reduction: { type: 'near_field' },
+            transcription: { model: 'gpt-realtime-whisper' },
+          },
+          output: {
+            language: outputLang,
+          },
         },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: isIntake ? 0.5 : 0.65,
-          prefix_padding_ms: 300,
-          silence_duration_ms: isIntake ? 1200 : 700,
-        },
-        temperature: isIntake ? 0.7 : 0.6,
       },
     });
-    this.ready = true;
-    console.log(`[openai] session configured in ${this.mode} mode`);
+    console.log(`[openai] translate mode: auto-detect → ${outputLang}`);
+  }
+
+  _configureWhisperSession() {
+    this._send({
+      type: 'session.update',
+      session: {
+        type: 'transcription',
+        audio: {
+          input: {
+            transcription: {
+              model: 'gpt-realtime-whisper',
+              language: config.whisperLanguageHint || undefined,
+            },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 700,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  _configureConversationSession() {
+    const isIntake = this.mode === 'intake';
+    const sessionConfig = {
+      modalities: ['text', 'audio'],
+      instructions: isIntake ? INTAKE_INSTRUCTIONS : TRANSLATOR_INSTRUCTIONS,
+      voice: config.voice,
+      input_audio_format: 'g711_ulaw',
+      output_audio_format: 'g711_ulaw',
+      input_audio_transcription: {
+        model: 'whisper-1',
+        language: config.whisperLanguageHint || undefined,
+      },
+      turn_detection: {
+        type: 'server_vad',
+        threshold: isIntake ? 0.5 : 0.65,
+        prefix_padding_ms: 300,
+        silence_duration_ms: isIntake ? 1200 : 700,
+      },
+      temperature: isIntake ? 0.7 : 0.6,
+    };
+
+    if (this.model.includes('gpt-realtime-2')) {
+      sessionConfig.reasoning = { effort: 'low' };
+    }
+
+    this._send({ type: 'session.update', session: sessionConfig });
   }
 
   _handleEvent(data) {
@@ -152,6 +207,81 @@ export class OpenAIRealtimeClient extends EventEmitter {
       return;
     }
 
+    if (this.isTranslate) {
+      this._handleTranslateEvent(event);
+    } else if (this.isWhisper) {
+      this._handleWhisperEvent(event);
+    } else {
+      this._handleConversationEvent(event);
+    }
+  }
+
+  _handleTranslateEvent(event) {
+    switch (event.type) {
+      case 'session.created':
+      case 'session.updated':
+        console.log(`[openai] ${event.type}`);
+        break;
+
+      case 'output_audio.delta':
+        this.emit('audio', event.delta);
+        break;
+
+      case 'output_audio_transcript.delta':
+        this.emit('transcript_delta', { role: 'translation', delta: event.delta });
+        break;
+
+      case 'output_audio_transcript.done':
+        if (config.debugLogTranscripts) console.log(`[openai] translated: ${event.transcript}`);
+        this.emit('transcript', { role: 'translation', text: event.transcript });
+        break;
+
+      case 'input_audio_transcript.delta':
+        this.emit('transcript_delta', { role: 'caller', delta: event.delta });
+        break;
+
+      case 'input_audio_transcript.done':
+        if (config.debugLogTranscripts) console.log(`[openai] heard: ${event.transcript}`);
+        this.emit('transcript', { role: 'caller', text: event.transcript });
+        break;
+
+      case 'error':
+        console.error('[openai] error:', event.error);
+        this.emit('error', event.error);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  _handleWhisperEvent(event) {
+    switch (event.type) {
+      case 'session.created':
+      case 'session.updated':
+        console.log(`[openai] ${event.type}`);
+        break;
+
+      case 'transcript.delta':
+        this.emit('transcript_delta', { role: 'caller', delta: event.delta });
+        break;
+
+      case 'transcript.done':
+        if (config.debugLogTranscripts) console.log(`[openai] transcribed: ${event.transcript}`);
+        this.emit('transcript', { role: 'caller', text: event.transcript });
+        break;
+
+      case 'error':
+        console.error('[openai] error:', event.error);
+        this.emit('error', event.error);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  _handleConversationEvent(event) {
     switch (event.type) {
       case 'session.created':
       case 'session.updated':
@@ -160,16 +290,10 @@ export class OpenAIRealtimeClient extends EventEmitter {
 
       case 'response.created':
       case 'response.output_item.added':
-        // AI is about to / just started speaking. Open the echo gate.
         this._markAiSpeaking();
         break;
 
       case 'input_audio_buffer.speech_started':
-        // We intentionally no longer emit 'speech_started' for a barge-in
-        // clear, because on phones without echo cancellation this event
-        // fires on the AI hearing itself. The echo gate below (sendAudio)
-        // prevents that inbound audio from ever reaching the server during
-        // AI speech, but keep this comment as a reminder.
         break;
 
       case 'input_audio_buffer.speech_stopped':
@@ -186,45 +310,38 @@ export class OpenAIRealtimeClient extends EventEmitter {
         break;
 
       case 'response.audio_transcript.done':
-        if (config.debugLogTranscripts) {
-          console.log(`[openai] translated: ${event.transcript}`);
-        }
+        if (config.debugLogTranscripts) console.log(`[openai] translated: ${event.transcript}`);
         this.emit('transcript', { role: 'translation', text: event.transcript });
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
-        if (config.debugLogTranscripts) {
-          console.log(`[openai] heard:      ${event.transcript}`);
-        }
+        if (config.debugLogTranscripts) console.log(`[openai] heard: ${event.transcript}`);
         this.emit('transcript', { role: 'caller', text: event.transcript });
         break;
 
       case 'response.audio.done':
       case 'response.done':
-        // Start the trailing-echo release timer.
         this._markAiDoneSpeaking();
         break;
 
       case 'error':
-        console.error('[openai] error event:', event.error);
+        console.error('[openai] error:', event.error);
         this.emit('error', event.error);
         break;
 
       default:
-        // Dozens of other event types exist; ignore unless we need them.
         break;
     }
   }
 
   sendAudio(audioBase64) {
-    // Echo gate: drop inbound audio while the AI is speaking. The caller's
-    // phone mic almost always picks up our own TTS, and OpenAI's VAD would
-    // otherwise treat it as a new user turn, truncating the translation.
     if (this.aiSpeaking) return;
-    this._send({
-      type: 'input_audio_buffer.append',
-      audio: audioBase64,
-    });
+
+    if (this.isTranslate || this.isWhisper) {
+      this._send({ type: 'input_audio_buffer.append', audio: audioBase64 });
+    } else {
+      this._send({ type: 'input_audio_buffer.append', audio: audioBase64 });
+    }
   }
 
   _send(obj) {

@@ -20,7 +20,7 @@ export const config = {
   // OpenAI
   openaiApiKey: required('OPENAI_API_KEY'),
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-realtime-preview-2024-12-17',
-  openaiTranslateModel: process.env.OPENAI_TRANSLATE_MODEL || 'gpt-realtime-translate',
+  openaiTranslateModel: process.env.OPENAI_TRANSLATE_MODEL || '',
   openaiWhisperModel: process.env.OPENAI_WHISPER_MODEL || 'gpt-realtime-whisper',
   voice: process.env.VOICE || 'alloy',
 

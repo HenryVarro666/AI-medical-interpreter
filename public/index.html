@@ -29,16 +29,10 @@
           <option value="gpt-realtime-2">gpt-realtime-2 (GPT-5 class)</option>
           <option value="gpt-4o-realtime">gpt-4o-realtime (legacy)</option>
         </select>
-        <button id="generate-url-btn" class="btn btn-primary">Generate Webhook URL</button>
+        <button id="sync-twilio-btn" class="btn btn-primary">Sync to Twilio</button>
+        <span id="sync-status" class="sync-status"></span>
         <button id="demo-btn" class="btn">Run Demo</button>
       </div>
-    </div>
-    <div id="webhook-display" class="webhook-display" style="display:none;">
-      <span>Twilio Webhook:</span>
-      <code id="webhook-url"></code>
-      <button id="copy-url-btn" class="btn">Copy</button>
-      <button id="sync-twilio-btn" class="btn btn-primary">Sync to Twilio</button>
-      <span id="sync-status" class="sync-status"></span>
     </div>
   </div>
 

@@ -135,10 +135,12 @@ export class OpenAIRealtimeClient extends EventEmitter {
       session: {
         audio: {
           input: {
+            format: { type: 'audio/pcmu' },
             noise_reduction: { type: 'near_field' },
             transcription: { model: 'gpt-realtime-whisper' },
           },
           output: {
+            format: { type: 'audio/pcmu' },
             language: outputLang,
           },
         },

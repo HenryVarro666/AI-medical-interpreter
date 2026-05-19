@@ -13,6 +13,13 @@ async function fetchSessions() {
     const res = await fetch('/api/sessions');
     const sessions = await res.json();
     renderSessionList(sessions);
+
+    const activeSession = sessions.find(s => s.status === 'active');
+    if (activeSession && currentSessionId !== activeSession.id) {
+      $('#session-select').value = activeSession.id;
+      connectToSession(activeSession.id);
+    }
+
     return sessions;
   } catch { return []; }
 }
@@ -364,9 +371,10 @@ function clearTranscript() {
 function setConnectionStatus(status) {
   const el = $('#connection-status');
   el.className = `connection-status ${status}`;
-  el.textContent = status === 'connected' ? 'Connected'
+  el.textContent = status === 'connected' ? 'Live'
     : status === 'connecting' ? 'Connecting...'
-    : 'Disconnected';
+    : currentSessionId ? 'Reconnecting...'
+    : 'Waiting for call';
 }
 
 function escapeHtml(str) {
@@ -398,48 +406,17 @@ function copyDocument() {
 
 // --- Config controls -------------------------------------------------------
 
-function generateWebhookUrl() {
+async function buildWebhookUrl() {
   const mode = $('#mode-select').value;
   const model = $('#model-select').value;
-  const host = location.host;
+  const res = await fetch('/api/public-host');
+  const { host } = await res.json();
   let url = `https://${host}/twilio/incoming-call?mode=${mode}`;
   if (model) url += `&model=${model}`;
-
-  $('#webhook-url').textContent = url;
-  $('#webhook-display').style.display = 'flex';
-}
-
-function copyWebhookUrl() {
-  const url = $('#webhook-url').textContent;
-  navigator.clipboard.writeText(url).then(() => {
-    const btn = $('#copy-url-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = 'Copy', 2000);
-  });
-}
-
-async function runDemo() {
-  const btn = $('#demo-btn');
-  btn.textContent = 'Creating...';
-  btn.disabled = true;
-  try {
-    const res = await fetch('/api/demo', { method: 'POST' });
-    const data = await res.json();
-    await fetchSessions();
-    $('#session-select').value = data.sessionId;
-    await connectToSession(data.sessionId);
-    btn.textContent = 'Run Demo';
-  } catch (err) {
-    btn.textContent = 'Failed';
-    setTimeout(() => { btn.textContent = 'Run Demo'; }, 2000);
-  }
-  btn.disabled = false;
+  return url;
 }
 
 async function syncToTwilio() {
-  const url = $('#webhook-url').textContent;
-  if (!url) return;
-
   const btn = $('#sync-twilio-btn');
   const status = $('#sync-status');
   btn.disabled = true;
@@ -450,7 +427,7 @@ async function syncToTwilio() {
     const res = await fetch('/api/twilio-sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhookUrl: url }),
+      body: JSON.stringify({ webhookUrl: await buildWebhookUrl() }),
     });
     const data = await res.json();
 
@@ -470,22 +447,23 @@ async function syncToTwilio() {
   btn.disabled = false;
 }
 
-async function checkTwilioConfig() {
+async function runDemo() {
+  const btn = $('#demo-btn');
+  btn.textContent = 'Creating...';
+  btn.disabled = true;
   try {
-    const res = await fetch('/api/twilio-config');
+    const res = await fetch('/api/demo', { method: 'POST' });
     const data = await res.json();
-    const btn = $('#sync-twilio-btn');
-    if (btn && !data.configured) {
-      btn.title = 'Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER to .env';
-    }
+    await fetchSessions();
+    $('#session-select').value = data.sessionId;
+    await connectToSession(data.sessionId);
   } catch {}
+  btn.textContent = 'Run Demo';
+  btn.disabled = false;
 }
 
-$('#generate-url-btn')?.addEventListener('click', generateWebhookUrl);
-$('#copy-url-btn')?.addEventListener('click', copyWebhookUrl);
 $('#sync-twilio-btn')?.addEventListener('click', syncToTwilio);
 $('#demo-btn')?.addEventListener('click', runDemo);
-checkTwilioConfig();
 
 $('#mode-select')?.addEventListener('change', () => {
   const mode = $('#mode-select').value;

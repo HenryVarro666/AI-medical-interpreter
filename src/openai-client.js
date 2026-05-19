@@ -22,7 +22,6 @@ const LANG_CODES = {
 
 function resolveModel(mode, modelOverride) {
   if (modelOverride) return AVAILABLE_MODELS[modelOverride] || modelOverride;
-  if (mode === 'translator' && config.openaiTranslateModel) return config.openaiTranslateModel;
   return config.openaiModel;
 }
 
@@ -343,7 +342,8 @@ export class OpenAIRealtimeClient extends EventEmitter {
 
   sendAudio(audioBase64) {
     if (this.aiSpeaking) return;
-    this._send({ type: 'session.input_audio_buffer.append', audio: audioBase64 });
+    const prefix = this.isTranslate ? 'session.' : '';
+    this._send({ type: `${prefix}input_audio_buffer.append`, audio: audioBase64 });
   }
 
   _send(obj) {

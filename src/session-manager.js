@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
+import { mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs';
 import { config } from './config.js';
 import { logAudit } from './audit-logger.js';
 import { generateMedicalDocument } from './doc-generator.js';
+
+const SESSIONS_DIR = 'data/sessions';
 import { cleanTranscript } from './transcript-cleaner.js';
 
 class SessionManager extends EventEmitter {
@@ -99,6 +102,8 @@ class SessionManager extends EventEmitter {
     } else {
       session.status = 'completed';
     }
+
+    this._saveToDisk(session);
   }
 
   getSession(sessionId) {
@@ -148,6 +153,42 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  _saveToDisk(session) {
+    try {
+      mkdirSync(SESSIONS_DIR, { recursive: true });
+      const data = {
+        id: session.id,
+        mode: session.mode,
+        status: session.status,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        languagePair: session.languagePair,
+        transcripts: session.transcripts,
+        document: session.document,
+      };
+      const path = `${SESSIONS_DIR}/${session.id}.json`;
+      writeFileSync(path, JSON.stringify(data, null, 2));
+      console.log(`[session] saved to ${path}`);
+    } catch (err) {
+      console.error(`[session] save failed:`, err.message);
+    }
+  }
+
+  _loadFromDisk() {
+    try {
+      mkdirSync(SESSIONS_DIR, { recursive: true });
+      const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
+      for (const file of files) {
+        const data = JSON.parse(readFileSync(`${SESSIONS_DIR}/${file}`, 'utf8'));
+        data.dashboardClients = new Set();
+        this.sessions.set(data.id, data);
+      }
+      if (files.length > 0) {
+        console.log(`[session] loaded ${files.length} sessions from disk`);
+      }
+    } catch {}
+  }
+
   _cleanup() {
     const ttl = config.sessionTtlMinutes * 60_000;
     const now = Date.now();
@@ -163,4 +204,6 @@ class SessionManager extends EventEmitter {
   }
 }
 
-export const sessionManager = new SessionManager();
+const sessionManager = new SessionManager();
+sessionManager._loadFromDisk();
+export { sessionManager };

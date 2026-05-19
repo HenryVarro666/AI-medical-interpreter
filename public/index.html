@@ -14,6 +14,32 @@
     <span id="connection-status" class="connection-status disconnected">Disconnected</span>
   </div>
 
+  <!-- Call config panel -->
+  <div class="config-bar">
+    <div class="config-group">
+      <label>Next Call Settings</label>
+      <div class="config-controls">
+        <select id="mode-select">
+          <option value="translator">Translator (bidirectional)</option>
+          <option value="intake">Intake Operator (structured interview)</option>
+        </select>
+        <select id="model-select">
+          <option value="">Auto (recommended)</option>
+          <option value="gpt-realtime-translate">gpt-realtime-translate</option>
+          <option value="gpt-realtime-2">gpt-realtime-2 (GPT-5 class)</option>
+          <option value="gpt-4o-realtime">gpt-4o-realtime (legacy)</option>
+        </select>
+        <button id="generate-url-btn" class="btn btn-primary">Generate Webhook URL</button>
+        <button id="demo-btn" class="btn">Run Demo</button>
+      </div>
+    </div>
+    <div id="webhook-display" class="webhook-display" style="display:none;">
+      <span>Twilio Webhook:</span>
+      <code id="webhook-url"></code>
+      <button id="copy-url-btn" class="btn">Copy</button>
+    </div>
+  </div>
+
   <!-- Session selector bar -->
   <div class="session-bar">
     <label for="session-select">Session:</label>
@@ -34,10 +60,10 @@
   <!-- No session selected -->
   <div id="no-session" class="no-session">
     <h2>No Active Session</h2>
-    <p>Call the Twilio phone number to start a medical interpretation session. The session will appear in the dropdown above.</p>
+    <p>Select a mode and model above, then call the Twilio phone number. The session will appear in the dropdown automatically.</p>
   </div>
 
-  <!-- Session view (hidden until a session is selected) -->
+  <!-- Session view -->
   <div id="session-view" style="display: none;">
     <div class="main">
 

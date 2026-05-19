@@ -396,6 +396,61 @@ function copyDocument() {
   });
 }
 
+// --- Config controls -------------------------------------------------------
+
+function generateWebhookUrl() {
+  const mode = $('#mode-select').value;
+  const model = $('#model-select').value;
+  const host = location.host;
+  let url = `https://${host}/twilio/incoming-call?mode=${mode}`;
+  if (model) url += `&model=${model}`;
+
+  $('#webhook-url').textContent = url;
+  $('#webhook-display').style.display = 'flex';
+}
+
+function copyWebhookUrl() {
+  const url = $('#webhook-url').textContent;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = $('#copy-url-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+
+async function runDemo() {
+  const btn = $('#demo-btn');
+  btn.textContent = 'Creating...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/demo', { method: 'POST' });
+    const data = await res.json();
+    await fetchSessions();
+    $('#session-select').value = data.sessionId;
+    await connectToSession(data.sessionId);
+    btn.textContent = 'Run Demo';
+  } catch (err) {
+    btn.textContent = 'Failed';
+    setTimeout(() => { btn.textContent = 'Run Demo'; }, 2000);
+  }
+  btn.disabled = false;
+}
+
+$('#generate-url-btn')?.addEventListener('click', generateWebhookUrl);
+$('#copy-url-btn')?.addEventListener('click', copyWebhookUrl);
+$('#demo-btn')?.addEventListener('click', runDemo);
+
+$('#mode-select')?.addEventListener('change', () => {
+  const mode = $('#mode-select').value;
+  const modelSelect = $('#model-select');
+  if (mode === 'translator') {
+    modelSelect.value = 'gpt-realtime-translate';
+  } else {
+    modelSelect.value = 'gpt-realtime-2';
+  }
+  if ($('#webhook-display').style.display !== 'none') generateWebhookUrl();
+});
+
 // --- Init ------------------------------------------------------------------
 
 $('#session-select')?.addEventListener('change', (e) => {

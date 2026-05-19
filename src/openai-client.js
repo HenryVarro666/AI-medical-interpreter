@@ -28,14 +28,34 @@ import { config } from './config.js';
 import { TRANSLATOR_INSTRUCTIONS } from './prompts.js';
 import { INTAKE_INSTRUCTIONS } from './intake-prompts.js';
 
-const REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(config.openaiModel)}`;
+const AVAILABLE_MODELS = {
+  'gpt-4o-realtime':          'gpt-4o-realtime-preview-2024-12-17',
+  'gpt-realtime-2':           'gpt-realtime-2',
+  'gpt-realtime-translate':   'gpt-realtime-translate',
+  'gpt-realtime-whisper':     'gpt-realtime-whisper',
+};
+
+function resolveModel(mode, modelOverride) {
+  if (modelOverride) {
+    return AVAILABLE_MODELS[modelOverride] || modelOverride;
+  }
+  if (mode === 'translator') {
+    return config.openaiTranslateModel || config.openaiModel;
+  }
+  return config.openaiModel;
+}
+
+export function getAvailableModels() {
+  return Object.keys(AVAILABLE_MODELS);
+}
 
 export class OpenAIRealtimeClient extends EventEmitter {
-  constructor(mode = 'translator') {
+  constructor(mode = 'translator', modelOverride = null) {
     super();
     this.ws = null;
     this.ready = false;
     this.mode = mode;
+    this.model = resolveModel(mode, modelOverride);
 
     // Echo suppression: while the AI is actively speaking, incoming audio
     // is almost always our own TTS bleeding back through the caller's mic
@@ -64,8 +84,10 @@ export class OpenAIRealtimeClient extends EventEmitter {
   }
 
   connect() {
+    const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(this.model)}`;
+    console.log(`[openai] connecting to model: ${this.model}`);
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(REALTIME_URL, {
+      this.ws = new WebSocket(url, {
         headers: {
           Authorization: `Bearer ${config.openaiApiKey}`,
           'OpenAI-Beta': 'realtime=v1',

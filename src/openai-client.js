@@ -76,10 +76,11 @@ export class OpenAIRealtimeClient extends EventEmitter {
 
   _markAiDoneSpeaking() {
     if (this._aiSpeakingReleaseTimer) clearTimeout(this._aiSpeakingReleaseTimer);
+    const tailMs = this.mode === 'intake' ? 2000 : 800;
     this._aiSpeakingReleaseTimer = setTimeout(() => {
       this.aiSpeaking = false;
       this._aiSpeakingReleaseTimer = null;
-    }, 800);
+    }, tailMs);
   }
 
   connect() {

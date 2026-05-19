@@ -42,6 +42,8 @@ class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
+    if (entry.role === 'caller' && (!entry.text || entry.text.trim() === '')) return;
+
     const transcript = {
       id: session.transcripts.length + 1,
       role: entry.role,

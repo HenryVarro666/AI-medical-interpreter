@@ -195,8 +195,8 @@ export class OpenAIRealtimeClient extends EventEmitter {
           },
           turn_detection: {
             type: 'server_vad',
-            threshold: isIntake ? 0.5 : 0.65,
-            prefix_padding_ms: 300,
+            threshold: isIntake ? 0.75 : 0.65,
+            prefix_padding_ms: 500,
             silence_duration_ms: isIntake ? 1500 : 700,
             idle_timeout_ms: isIntake ? 15000 : undefined,
           },

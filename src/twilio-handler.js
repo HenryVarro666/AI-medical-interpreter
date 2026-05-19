@@ -26,10 +26,9 @@ export function handleIncomingCall(req, res) {
 
   const mode = req.query?.mode || req.body?.mode || config.defaultMode;
   const model = req.query?.model || req.body?.model || '';
-  let wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}`;
-  if (model) wsUrl += `&amp;model=${model}`;
+  const wsUrl = `wss://${host}/twilio/media-stream`;
 
-  console.log(`[twilio] incoming call: mode=${mode} model=${model} wsUrl=${wsUrl}`);
+  console.log(`[twilio] incoming call: mode=${mode} model=${model}`);
 
   const greeting = mode === 'intake'
     ? 'Connecting you to the medical intake system. A specialist will collect your information.'
@@ -39,7 +38,10 @@ export function handleIncomingCall(req, res) {
 <Response>
   <Say>${greeting}</Say>
   <Connect>
-    <Stream url="${wsUrl}" />
+    <Stream url="${wsUrl}">
+      <Parameter name="mode" value="${mode}" />
+      <Parameter name="model" value="${model}" />
+    </Stream>
   </Connect>
 </Response>`;
 
@@ -48,18 +50,15 @@ export function handleIncomingCall(req, res) {
 }
 
 export function handleMediaStream(ws, req) {
-  console.log(`[twilio] Media stream WS opened from ${req.socket.remoteAddress}`);
-
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  console.log(`[twilio] WS raw URL: ${req.url}`);
-  const mode = url.searchParams.get('mode') || config.defaultMode;
-  const modelOverride = url.searchParams.get('model') || null;
+  console.log(`[twilio] Media stream WS opened`);
 
   let streamSid = null;
   let callSid = null;
   let openai = null;
   let session = null;
   let silenceWarned = false;
+  let mode = config.defaultMode;
+  let modelOverride = null;
 
   function forwardAudio(audioBase64) {
     if (ws.readyState !== ws.OPEN || !streamSid) return;
@@ -96,7 +95,12 @@ export function handleMediaStream(ws, req) {
       case 'start': {
         streamSid = msg.start.streamSid;
         callSid = msg.start.callSid || null;
-        console.log(`[twilio] stream started: ${streamSid} (mode: ${mode})`);
+
+        const params = msg.start.customParameters || {};
+        mode = params.mode || config.defaultMode;
+        modelOverride = params.model || null;
+
+        console.log(`[twilio] stream started: ${streamSid} | mode=${mode} model=${modelOverride || 'default'}`);
 
         registerCall(callSid || streamSid, 'unknown');
         session = sessionManager.createSession(streamSid, callSid, mode);

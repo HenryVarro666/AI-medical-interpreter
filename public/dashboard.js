@@ -228,7 +228,7 @@ function updateSessionStatus(data) {
   dot.className = `status-dot ${data.status}`;
   label.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
 
-  if (data.status === 'ended' || data.status === 'completed') {
+  if (data.status !== 'active') {
     stopDurationTimer();
   }
 }

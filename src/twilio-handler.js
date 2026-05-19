@@ -26,7 +26,8 @@ export function handleIncomingCall(req, res) {
 
   const mode = req.query?.mode || req.body?.mode || config.defaultMode;
   const model = req.query?.model || req.body?.model || '';
-  const wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}&model=${model}`;
+  let wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}`;
+  if (model) wsUrl += `&amp;model=${model}`;
 
   const greeting = mode === 'intake'
     ? 'Connecting you to the medical intake system. A specialist will collect your information.'

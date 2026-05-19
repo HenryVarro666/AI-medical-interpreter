@@ -436,9 +436,56 @@ async function runDemo() {
   btn.disabled = false;
 }
 
+async function syncToTwilio() {
+  const url = $('#webhook-url').textContent;
+  if (!url) return;
+
+  const btn = $('#sync-twilio-btn');
+  const status = $('#sync-status');
+  btn.disabled = true;
+  btn.textContent = 'Syncing...';
+  status.textContent = '';
+
+  try {
+    const res = await fetch('/api/twilio-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhookUrl: url }),
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      status.textContent = `Synced to ${data.phoneNumber}`;
+      status.style.color = 'var(--status-active)';
+    } else {
+      status.textContent = data.error;
+      status.style.color = 'var(--danger)';
+    }
+  } catch (err) {
+    status.textContent = err.message;
+    status.style.color = 'var(--danger)';
+  }
+
+  btn.textContent = 'Sync to Twilio';
+  btn.disabled = false;
+}
+
+async function checkTwilioConfig() {
+  try {
+    const res = await fetch('/api/twilio-config');
+    const data = await res.json();
+    const btn = $('#sync-twilio-btn');
+    if (btn && !data.configured) {
+      btn.title = 'Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER to .env';
+    }
+  } catch {}
+}
+
 $('#generate-url-btn')?.addEventListener('click', generateWebhookUrl);
 $('#copy-url-btn')?.addEventListener('click', copyWebhookUrl);
+$('#sync-twilio-btn')?.addEventListener('click', syncToTwilio);
 $('#demo-btn')?.addEventListener('click', runDemo);
+checkTwilioConfig();
 
 $('#mode-select')?.addEventListener('change', () => {
   const mode = $('#mode-select').value;

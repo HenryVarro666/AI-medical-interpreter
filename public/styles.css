@@ -102,6 +102,11 @@ body {
   user-select: all;
 }
 
+.sync-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .session-bar {
   background: var(--surface);
   border-bottom: 1px solid var(--border);

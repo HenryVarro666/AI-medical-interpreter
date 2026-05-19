@@ -11,6 +11,7 @@ import { sessionManager } from './session-manager.js';
 import { logAudit } from './audit-logger.js';
 import { getCallStats } from './call-guard.js';
 import { getAvailableModels } from './openai-client.js';
+import { syncTwilioWebhook } from './twilio-sync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +41,21 @@ app.get('/api/models', (_req, res) => {
       translator: config.openaiTranslateModel,
       intake: config.openaiModel,
     },
+  });
+});
+
+// --- Twilio webhook sync ---------------------------------------------------
+app.post('/api/twilio-sync', async (req, res) => {
+  const { webhookUrl } = req.body;
+  if (!webhookUrl) return res.status(400).json({ error: 'webhookUrl is required' });
+  const result = await syncTwilioWebhook(webhookUrl);
+  res.json(result);
+});
+
+app.get('/api/twilio-config', (_req, res) => {
+  res.json({
+    configured: !!(config.twilioAccountSid && config.twilioAuthToken && config.twilioPhoneNumber),
+    phoneNumber: config.twilioPhoneNumber ? config.twilioPhoneNumber.replace(/.(?=.{4})/g, '*') : null,
   });
 });
 

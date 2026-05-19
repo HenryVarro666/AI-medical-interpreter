@@ -33,6 +33,11 @@ export const config = {
   speakerALang: process.env.SPEAKER_A_LANG || 'Chinese',
   speakerBLang: process.env.SPEAKER_B_LANG || 'English',
 
+  // Twilio (for auto-sync webhook URL)
+  twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
+  twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
+  twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+
   // Voice cloning bridge (future)
   enableVoiceClone: process.env.ENABLE_VOICE_CLONE === 'true',
   elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || null,

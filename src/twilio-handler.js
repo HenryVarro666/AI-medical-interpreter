@@ -3,6 +3,24 @@ import { config } from './config.js';
 import { sessionManager } from './session-manager.js';
 import { checkCallAllowed, registerCall, unregisterCall, trackAudioChunk } from './call-guard.js';
 
+async function hangupCall(callSid) {
+  if (!callSid || !config.twilioAccountSid || !config.twilioAuthToken) return;
+  try {
+    const auth = Buffer.from(`${config.twilioAccountSid}:${config.twilioAuthToken}`).toString('base64');
+    await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${config.twilioAccountSid}/Calls/${callSid}.json`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'Status=completed',
+      }
+    );
+    console.log(`[twilio] force-hangup: ${callSid}`);
+  } catch (err) {
+    console.error(`[twilio] hangup failed:`, err.message);
+  }
+}
+
 export function handleIncomingCall(req, res) {
   const rawHost = config.publicHost || req.headers.host || '';
   const host = rawHost
@@ -124,7 +142,13 @@ export function handleMediaStream(ws, req) {
       case 'media':
         if (openai?.isReady()) {
           const guard = trackAudioChunk(callSid || streamSid, msg.media.payload);
-          if (guard.action === 'warn_silence' && !silenceWarned) {
+          if (guard.action === 'hangup_silence') {
+            sessionManager.addTranscript(session?.id, {
+              role: 'system',
+              text: '[Call ended due to extended silence]',
+            });
+            hangupCall(callSid);
+          } else if (guard.action === 'warn_silence' && !silenceWarned) {
             silenceWarned = true;
             sessionManager.addTranscript(session?.id, {
               role: 'system',

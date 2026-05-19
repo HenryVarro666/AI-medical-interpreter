@@ -61,6 +61,10 @@ export function trackAudioChunk(callSid, payload) {
   }
 
   const silentSeconds = entry.silentChunks * 0.02;
+  if (silentSeconds > config.maxSilenceDurationSec * 2) {
+    logAudit('call_force_ended', null, entry.callerNumber, { reason: 'extended_silence_hangup' });
+    return { action: 'hangup_silence' };
+  }
   if (silentSeconds > config.maxSilenceDurationSec) {
     logAudit('call_warning', null, entry.callerNumber, { reason: 'extended_silence' });
     return { action: 'warn_silence' };

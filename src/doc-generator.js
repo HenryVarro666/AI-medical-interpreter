@@ -9,7 +9,9 @@ export async function generateMedicalDocument(session) {
     ? Math.round((new Date(session.endedAt) - new Date(session.startedAt)) / 1000)
     : 0;
 
+  console.log(`[doc-gen] generating SOAP note from ${transcript.length} entries...`);
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

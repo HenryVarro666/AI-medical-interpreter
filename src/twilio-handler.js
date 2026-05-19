@@ -29,6 +29,8 @@ export function handleIncomingCall(req, res) {
   let wsUrl = `wss://${host}/twilio/media-stream?mode=${mode}`;
   if (model) wsUrl += `&amp;model=${model}`;
 
+  console.log(`[twilio] incoming call: mode=${mode} model=${model} wsUrl=${wsUrl}`);
+
   const greeting = mode === 'intake'
     ? 'Connecting you to the medical intake system. A specialist will collect your information.'
     : 'Connecting you to the AI translator. Please start speaking.';
@@ -49,6 +51,7 @@ export function handleMediaStream(ws, req) {
   console.log(`[twilio] Media stream WS opened from ${req.socket.remoteAddress}`);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
+  console.log(`[twilio] WS raw URL: ${req.url}`);
   const mode = url.searchParams.get('mode') || config.defaultMode;
   const modelOverride = url.searchParams.get('model') || null;
 

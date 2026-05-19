@@ -305,26 +305,27 @@ export class OpenAIRealtimeClient extends EventEmitter {
         this.emit('speech_stopped');
         break;
 
-      case 'response.audio.delta':
+      // GA API: response.output_audio.delta (beta was response.audio.delta)
+      case 'response.output_audio.delta':
         this._markAiSpeaking();
         this.emit('audio', event.delta);
         break;
 
-      case 'response.audio_transcript.delta':
+      case 'response.output_audio_transcript.delta':
         this.emit('transcript_delta', { role: 'translation', delta: event.delta });
         break;
 
-      case 'response.audio_transcript.done':
-        if (config.debugLogTranscripts) console.log(`[openai] translated: ${event.transcript}`);
+      case 'response.output_audio_transcript.done':
+        console.log(`[openai] translated: ${(event.transcript || '').slice(0, 80)}`);
         this.emit('transcript', { role: 'translation', text: event.transcript });
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
-        if (config.debugLogTranscripts) console.log(`[openai] heard: ${event.transcript}`);
+        console.log(`[openai] heard: ${(event.transcript || '').slice(0, 80)}`);
         this.emit('transcript', { role: 'caller', text: event.transcript });
         break;
 
-      case 'response.audio.done':
+      case 'response.output_audio.done':
       case 'response.done':
         this._markAiDoneSpeaking();
         break;

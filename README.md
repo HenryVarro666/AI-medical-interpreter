@@ -17,6 +17,20 @@ Real-time medical phone call interpretation service built on **Twilio Media Stre
 
 A caller dials in, speaks Chinese — the other side hears English. Speaks English — hears Chinese. End-to-end first-token latency: **~400-800ms**.
 
+<!-- problem-framing:start -->
+
+## Problem and evidence
+
+> **Can a telephone interpretation prototype preserve the meaning of bilingual turns through interruptions and connection failures while keeping response delay measurable and bounded?**
+
+**Why it matters:** Missing a negation, number or speaker turn can change the meaning of a conversation. Low first-audio latency alone cannot establish faithful interpretation.
+
+**Central tension:** Early responses reduce waiting, while premature turn completion and echo suppression may discard speech or create overlapping output. Generated summaries can also introduce statements absent from the call.
+
+[Full problem and verification plan](PROBLEM.md)
+
+<!-- problem-framing:end -->
+
 ## What It Does
 
 ### Two Operating Modes

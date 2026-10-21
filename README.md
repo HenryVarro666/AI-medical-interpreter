@@ -1,15 +1,21 @@
+<div align="center">
+
 # AI Medical Interpreter
+
+**Chinese–English medical interpretation over the phone, in real time.**
+
+![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs&logoColor=white)
+![Twilio](https://img.shields.io/badge/Twilio-Media%20Streams-F22F46?logo=twilio&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-Realtime%20API-412991?logo=openai&logoColor=white)
+[![homepage](https://img.shields.io/badge/homepage-ccao2679.com-555555)](https://www.ccao2679.com/projects/#ai-medical-interpreter)
+
+<img src="docs/figures/overview.png" alt="Overview poster: phone call through Twilio and the OpenAI Realtime API, live transcript and SOAP note, first token in about 400-800 ms" width="100%">
+
+</div>
 
 Real-time medical phone call interpretation service built on **Twilio Media Streams** + **OpenAI Realtime API**, with a live web dashboard and auto-generated SOAP clinical documentation.
 
 A caller dials in, speaks Chinese — the other side hears English. Speaks English — hears Chinese. End-to-end first-token latency: **~400-800ms**.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.svg">
-    <img src="docs/overview-light.svg" alt="Overview: patient and provider talk through Twilio and the OpenAI Realtime API; the call yields a live transcript and a SOAP note" width="560">
-  </picture>
-</p>
 
 ## What It Does
 

@@ -4,6 +4,13 @@ Real-time medical phone call interpretation service built on **Twilio Media Stre
 
 A caller dials in, speaks Chinese — the other side hears English. Speaks English — hears Chinese. End-to-end first-token latency: **~400-800ms**.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.svg">
+    <img src="docs/overview-light.svg" alt="Overview: patient and provider talk through Twilio and the OpenAI Realtime API; the call yields a live transcript and a SOAP note" width="560">
+  </picture>
+</p>
+
 ## What It Does
 
 ### Two Operating Modes

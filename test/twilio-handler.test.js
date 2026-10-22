@@ -169,3 +169,31 @@ test('extended silence ends the call once, the same way as max duration', async 
     '[Call ended due to extended silence]',
   ]);
 });
+
+test('an OpenAI connection failure ends the call instead of crashing the server', async (t) => {
+  resetTwilio(t);
+  const { ws } = await openStream(incomingCall('+15557770000', 'CA-oai-down'), 'CA-oai-down', {
+    connectError: new Error('Unexpected server response: 401'),
+  });
+  await flush();
+
+  assert.equal(fetchMock.twilioCalls.length, 1);
+  assert.equal(ws.readyState, ws.CLOSED);
+  assert.deepEqual(ws.closeCalls[0], { code: 1000, reason: 'openai_unavailable' });
+  assert.equal(getCallStats().activeCalls, 0);
+});
+
+test('a caller hanging up while OpenAI is still connecting needs no REST hang-up', async (t) => {
+  resetTwilio(t);
+  const { ws, openai } = await openStream(incomingCall('+15557770001', 'CA-early-bye'), 'CA-early-bye', {
+    pendingConnect: true,
+  });
+  assert.equal(getCallStats().activeCalls, 1);
+
+  ws.close(1000, 'caller hung up'); // Twilio side goes away mid-connect
+  await flush();
+
+  assert.equal(openai.closed, true);
+  assert.equal(fetchMock.twilioCalls.length, 0);
+  assert.equal(getCallStats().activeCalls, 0);
+});

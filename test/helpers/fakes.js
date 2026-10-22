@@ -27,20 +27,30 @@ export class FakeTwilioSocket extends EventEmitter {
   }
 }
 
-/** Stand-in for OpenAIRealtimeClient: no network, records what it is sent. */
+/**
+ * Stand-in for OpenAIRealtimeClient: no network, records what it is sent.
+ * connectError: connect() rejects with it. pendingConnect: connect() stays
+ * pending until close(), then rejects (as ws does when a CONNECTING socket
+ * is closed).
+ */
 export class FakeOpenAIClient extends EventEmitter {
-  constructor(mode, model, { connectError = null } = {}) {
+  constructor(mode, model, { connectError = null, pendingConnect = false } = {}) {
     super();
     this.mode = mode;
     this.model = model;
     this.connectError = connectError;
+    this.pendingConnect = pendingConnect;
     this.ready = false;
     this.closed = false;
     this.audio = [];
+    this._rejectPending = null;
   }
 
   async connect() {
     if (this.connectError) throw this.connectError;
+    if (this.pendingConnect) {
+      await new Promise((_resolve, reject) => { this._rejectPending = reject; });
+    }
     this.ready = true;
   }
 
@@ -55,6 +65,7 @@ export class FakeOpenAIClient extends EventEmitter {
   close() {
     this.closed = true;
     this.ready = false;
+    this._rejectPending?.(new Error('WebSocket was closed before the connection was established'));
   }
 }
 

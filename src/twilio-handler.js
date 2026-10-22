@@ -210,7 +210,17 @@ export function handleMediaStream(ws, req, {
           console.error('[openai] error:', err?.message || err);
         });
 
-        await openai.connect();
+        // This handler is async, so a rejection here would be unhandled and
+        // take the whole server down (e.g. OpenAI rejects the key, or the
+        // caller hangs up and cleanup() closes the socket mid-connect).
+        const client = openai;
+        try {
+          await client.connect();
+        } catch (err) {
+          console.error('[openai] connect failed:', err?.message || err);
+          // If cleanup() already ran, the call is over and there is nothing to end.
+          if (openai === client) endCall('openai_unavailable', '[Call ended: interpreter service unavailable]');
+        }
         break;
       }
 

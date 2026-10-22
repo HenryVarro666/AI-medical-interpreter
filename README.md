@@ -2,6 +2,8 @@
 
 # AI Medical Interpreter
 
+**English** · [简体中文](README.zh-CN.md)
+
 **Chinese–English medical interpretation over the phone, in real time.**
 
 ![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs&logoColor=white)
@@ -27,7 +29,7 @@ A caller dials in, speaks Chinese — the other side hears English. Speaks Engli
 
 **Central tension:** Early responses reduce waiting, while premature turn completion and echo suppression may discard speech or create overlapping output. Generated summaries can also introduce statements absent from the call.
 
-[Full problem and verification plan](PROBLEM.md)
+[Full problem and verification plan](PROBLEM.md) · [中文](PROBLEM.zh.md)
 
 <!-- problem-framing:end -->
 
@@ -64,6 +66,56 @@ While a call is active, open `http://localhost:5050` in a browser:
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    PHONE["Phone call<br/>(PSTN)"]
+
+    subgraph TW["Twilio"]
+        VOICE["Voice webhook"]
+        STREAM["Media Streams"]
+    end
+
+    subgraph SRV["Node.js server (src/)"]
+        IC["twilio-handler.js<br/>/twilio/incoming-call"]
+        GUARD["call-guard.js<br/>limits, silence"]
+        MS["twilio-handler.js<br/>handleMediaStream()"]
+        OC["openai-client.js<br/>echo gate"]
+        SM["session-manager.js<br/>sessions, transcripts"]
+        DH["dashboard-handler.js<br/>/dashboard/ws"]
+        DG["doc-generator.js<br/>SOAP note"]
+        STORE[("data/sessions/*.json<br/>data/audit.log")]
+    end
+
+    subgraph OAI["OpenAI"]
+        RT["Realtime API<br/>(WSS)"]
+        CHAT["GPT-4o<br/>Chat Completions"]
+    end
+
+    UI["Browser dashboard<br/>public/dashboard.js"]
+
+    PHONE -->|"dials in"| VOICE
+    PHONE <-->|"call audio"| STREAM
+    VOICE -->|"POST"| IC
+    IC -->|"TwiML Stream"| STREAM
+    IC -->|"checkCallAllowed"| GUARD
+    STREAM <-->|"WS /twilio/media-stream"| MS
+    MS -->|"trackAudioChunk"| GUARD
+    MS <-->|"base64 μ-law"| OC
+    OC <-->|"audio/pcmu"| RT
+    OC -->|"transcript events"| SM
+    SM -->|"live transcript"| DH
+    DH <-->|"WebSocket"| UI
+    UI -->|"GET /api/sessions"| SM
+    SM -->|"endSession()"| DG
+    DG <-->|"transcript to JSON"| CHAT
+    SM -->|"save, audit"| STORE
+```
+
+Read it top to bottom: call audio goes phone → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime and back the same way as base64 μ-law, with no transcoding. Transcript events fan out from `session-manager.js` to the dashboard over WebSocket; when the call ends, `doc-generator.js` sends the transcript to GPT-4o and the SOAP note is saved with the session.
+
+<details>
+<summary>Text version of the diagram</summary>
+
 ```
 Phone (PSTN) ──► Twilio ──► /twilio/incoming-call?mode=translator|intake
                                 │
@@ -91,6 +143,8 @@ Phone (PSTN) ──► Twilio ──► /twilio/incoming-call?mode=translator|in
             (live transcript)        (medical document)
 ```
 
+</details>
+
 **Why OpenAI Realtime API (not Whisper -> GPT -> TTS)?**
 
 | Approach | Latency | Complexity |
@@ -114,7 +168,7 @@ The Realtime API handles ASR, translation, and TTS in one connection. Both Twili
 ### Setup
 
 ```bash
-git clone https://github.com/chaocao2679/AI-medical-interpreter.git
+git clone https://github.com/HenryVarro666/AI-medical-interpreter.git
 cd AI-medical-interpreter
 
 npm install
@@ -327,7 +381,7 @@ Designed in, not fully implemented (this is a proof-of-concept):
 | Audit logging | Implemented | Append-only JSONL, all data access logged |
 | Transport encryption | In place | WSS for Twilio, OpenAI, and dashboard |
 | PHI log gating | Implemented | `DEBUG_LOG_TRANSCRIPTS` flag controls console output |
-| Data lifecycle | Implemented | TTL-based session cleanup, no permanent storage |
+| Data lifecycle | Partial | Ended sessions leave memory after `SESSION_TTL_MINUTES`, but every completed session (transcript and SOAP note) is written to `data/sessions/<id>.json` and reloaded at startup |
 | Access control | Architecture only | UUID-based session access (JWT/RBAC ready) |
 | BAA agreements | Not in scope | Required for production (Twilio, OpenAI, hosting) |
 | Encryption at rest | Not in scope | Add for production deployment |

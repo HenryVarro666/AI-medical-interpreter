@@ -11,13 +11,13 @@
 ![OpenAI](https://img.shields.io/badge/OpenAI-Realtime%20API-412991?logo=openai&logoColor=white)
 [![homepage](https://img.shields.io/badge/homepage-ccao2679.com-555555)](https://www.ccao2679.com/projects/#ai-medical-interpreter)
 
-<img src="docs/figures/overview.png" alt="概览海报：电话经 Twilio 与 OpenAI Realtime API 接入，生成实时转写与 SOAP 病历，首个 token 约 400-800 ms" width="100%">
+<img src="docs/figures/overview.png" alt="概览海报：电话经 Twilio 与 OpenAI Realtime API 接入，生成实时转写与 SOAP 病历" width="100%">
 
 </div>
 
 基于 **Twilio Media Streams** + **OpenAI Realtime API** 构建的实时医疗电话口译服务，配有实时 Web 看板，并能自动生成 SOAP 格式的临床文档。
 
-来电者拨入后说中文，对方听到的是英文；说英文，对方听到的是中文。端到端首 token 延迟：**~400-800ms**。
+来电者拨入后说中文，对方听到的是英文；说英文，对方听到的是中文。预期端到端首 token 延迟：**几百毫秒**。
 
 <!-- problem-framing:start -->
 
@@ -56,11 +56,12 @@
 
 ### 通话保护
 
-- 并发通话上限（默认：5）
-- 按号码限流（默认：10 分钟内 10 通）
-- 最长通话时长（默认：30 分钟后自动断开）
-- 静音检测：60 秒无语音后发出警告
-- 所有拒接和警告都会写入审计日志
+- **并发通话上限**（默认：5）：超过 `MAX_CONCURRENT_CALLS` 的来电会听到一句提示，然后被挂断。
+- **按号码限流**（默认：10 分钟内 10 通）：Voice webhook 会检查来电号码（`From`）在最近 `RATE_LIMIT_WINDOW_MIN` 内已接通了多少通电话。这个号码会以 `<Parameter name="from">` 传给媒体流，因此每通接通的电话都会记在该号码名下；超过上限时，来电者会听到 "Too many recent calls" 并被挂断。通话历史保存在内存里，所以服务重启后会清零，多个服务实例之间也不共享。
+- **最长通话时长**（默认：30 分钟）：到时服务端会主动结束通话：在转写中记一条说明，关闭 OpenAI 会话，通过 Twilio REST API 把通话设为 `Status=completed`，再关闭媒体流。SOAP 病历照常生成。
+- **静音检测**：连续 `MAX_SILENCE_SEC`（默认 60 秒）没有语音时，在转写中加一条警告；达到两倍时长（120 秒）时，按同样的方式结束通话。
+- 挂断需要配置 `TWILIO_ACCOUNT_SID` 和 `TWILIO_AUTH_TOKEN`。如果没有配置，或 REST 请求失败，服务端会打印警告并关闭媒体流，由 TwiML 中 `<Connect>` 之后的 `<Hangup/>` 结束通话。
+- 拒接、静音警告和强制挂断都会写入审计日志。
 
 ---
 
@@ -73,6 +74,7 @@ flowchart TD
     subgraph TW["Twilio"]
         VOICE["Voice webhook"]
         STREAM["Media Streams"]
+        REST["REST API<br/>Calls"]
     end
 
     subgraph SRV["Node.js 服务端 (src/)"]
@@ -100,6 +102,7 @@ flowchart TD
     IC -->|"checkCallAllowed"| GUARD
     STREAM <-->|"WS /twilio/media-stream"| MS
     MS -->|"trackAudioChunk"| GUARD
+    MS -->|"挂断"| REST
     MS <-->|"base64 μ-law"| OC
     OC <-->|"audio/pcmu"| RT
     OC -->|"转写事件"| SM
@@ -111,7 +114,7 @@ flowchart TD
     SM -->|"保存与审计"| STORE
 ```
 
-从上往下看：通话音频沿 电话 → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime 传过去，再按原路以 base64 μ-law 传回，全程不做转码。转写事件由 `session-manager.js` 经 WebSocket 推送到看板；通话结束后，`doc-generator.js` 把转写发给 GPT-4o 生成 SOAP 病历，并随会话一起保存。
+从上往下看：通话音频沿 电话 → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime 传过去，再按原路以 base64 μ-law 传回，全程不做转码。转写事件由 `session-manager.js` 经 WebSocket 推送到看板；通话结束后，`doc-generator.js` 把转写发给 GPT-4o 生成 SOAP 病历，并随会话一起保存。当 `call-guard.js` 报告通话超时或长时间静音时，`twilio-handler.js` 通过 Twilio REST API 结束通话。
 
 <details>
 <summary>架构图的纯文本版</summary>
@@ -130,8 +133,9 @@ Phone (PSTN) ──► Twilio ──► /twilio/incoming-call?mode=translator|in
                     └───────────┬───────────┘
                                 │
                     OpenAI Realtime API (WSS)
-                    ASR (Whisper) + LLM + TTS
-                    g711_ulaw 8kHz — zero resampling
+                    speech-to-speech model, caller
+                    transcripts by gpt-realtime-whisper
+                    audio/pcmu 8kHz — zero resampling
                                 │
                     ┌───────────┼───────────┐
                     │           │           │
@@ -147,12 +151,12 @@ Phone (PSTN) ──► Twilio ──► /twilio/incoming-call?mode=translator|in
 
 **为什么用 OpenAI Realtime API，而不是 Whisper -> GPT -> TTS？**
 
-| 方案 | 延迟 | 复杂度 |
+| 方案 | 延迟（估计值） | 复杂度 |
 |----------|---------|------------|
 | Whisper -> GPT-4 -> ElevenLabs | 2-4s | 高（VAD、分块、流式拼接） |
-| **OpenAI Realtime API** | **300-800ms** | **低（单个 WebSocket）** |
+| **OpenAI Realtime API** | **几百毫秒** | **低（单个 WebSocket）** |
 
-Realtime API 在一条连接里完成 ASR、翻译和 TTS。Twilio 和 OpenAI 都原生支持 **G.711 u-law 8kHz**，因此服务端**完全不做音频编解码**，只是透传 base64 字符串。
+Realtime API 在一条连接里完成语音识别、翻译和语音输出。Twilio 传来的是 **G.711 μ-law 8kHz**，Realtime 会话的输入和输出也配置成同一种编码（`audio/pcmu`），因此服务端**完全不做音频编解码**，只是透传 base64 字符串。
 
 ---
 
@@ -176,6 +180,8 @@ npm install
 cp .env.example .env
 # Edit .env — at minimum set OPENAI_API_KEY
 ```
+
+另外请设置 `TWILIO_ACCOUNT_SID` 和 `TWILIO_AUTH_TOKEN`，服务端才能通过 Twilio REST API 结束通话（时长上限、静音挂断）；设置 `TWILIO_PHONE_NUMBER` 后，还可以在看板里一键同步 webhook。
 
 ### 运行
 
@@ -201,6 +207,12 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 3. 开始说话，浏览器中会实时出现转写
 4. 挂断电话，SOAP 病历会自动生成
 
+自动化测试（`node:test`；Twilio、OpenAI 和网络请求都是模拟的，不需要任何账号）：
+
+```bash
+npm test
+```
+
 ---
 
 ## 目录结构
@@ -209,12 +221,14 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 .
 ├── src/
 │   ├── server.js              # Express HTTP + dual WebSocket entry point
-│   ├── twilio-handler.js      # Twilio Media Streams ↔ OpenAI bridge
+│   ├── twilio-handler.js      # TwiML, Media Streams ↔ OpenAI bridge, call hang-up
 │   ├── openai-client.js       # OpenAI Realtime WebSocket client + echo gate
 │   ├── session-manager.js     # Call session registry + transcript fan-out
 │   ├── dashboard-handler.js   # Dashboard WebSocket connection handler
 │   ├── call-guard.js          # Rate limiting, max duration, silence detection
 │   ├── doc-generator.js       # GPT-4o SOAP note generation
+│   ├── transcript-cleaner.js  # Optional GPT-4o-mini fix-up of caller transcripts
+│   ├── twilio-sync.js         # Points the Twilio number's Voice webhook here
 │   ├── medical-prompts.js     # Medical document generation prompts
 │   ├── intake-prompts.js      # Intake operator conversation protocol
 │   ├── prompts.js             # Translator system prompt (code-switching aware)
@@ -225,6 +239,7 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 │   ├── index.html             # Dashboard page
 │   ├── dashboard.js           # Dashboard client (WS + REST + rendering)
 │   └── styles.css             # Medical-themed UI
+├── test/                      # node:test suite (npm test), Twilio/OpenAI faked
 ├── docs/
 │   ├── architecture.md        # System design + data flow diagrams
 │   ├── technical-spec.md      # Full technical specification
@@ -246,10 +261,15 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 | 接口 | 方法 | 说明 |
 |----------|--------|-------------|
 | `/health` | GET | 健康检查 + 当前通话数 |
-| `/twilio/incoming-call` | POST | Twilio Voice webhook（返回 TwiML） |
+| `/twilio/incoming-call` | POST, GET | Twilio Voice webhook（返回 TwiML） |
 | `/api/sessions` | GET | 列出所有会话（进行中 + 最近结束） |
 | `/api/sessions/:id` | GET | 会话详情及完整转写 |
 | `/api/sessions/:id/document` | GET | 生成的 SOAP 病历 |
+| `/api/public-host` | GET | 拼 webhook URL 用的公网主机名（`PUBLIC_HOST` 或请求的 host） |
+| `/api/models` | GET | 可选的模型 key 及各模式的默认模型 |
+| `/api/twilio-config` | GET | Twilio 凭据是否已配置，以及打码后的电话号码 |
+| `/api/twilio-sync` | POST | 把 Twilio 号码的 Voice webhook 设为 `{ "webhookUrl": "..." }`（需要 `TWILIO_*`） |
+| `/api/demo` | POST | 用一段预设转写创建示例 intake 会话（生成 SOAP 病历时会调用 GPT-4o） |
 
 ### WebSocket
 
@@ -262,7 +282,8 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 
 | 参数 | 作用于 | 取值 | 默认值 |
 |-----------|----|--------|---------|
-| `mode` | `/twilio/incoming-call` | `translator`, `intake` | `translator` |
+| `mode` | `/twilio/incoming-call` | `translator`, `intake` | `DEFAULT_MODE`（`translator`） |
+| `model` | `/twilio/incoming-call` | `/api/models` 中的 key（`gpt-4o-realtime`, `gpt-realtime`, `gpt-realtime-2`, `gpt-realtime-translate`, `gpt-realtime-whisper`），或完整的模型 id | `OPENAI_MODEL` |
 
 ---
 
@@ -287,11 +308,16 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 | `SPEAKER_A_LANG` | `Chinese` | 第一种语言 |
 | `SPEAKER_B_LANG` | `English` | 第二种语言 |
 | `DEFAULT_MODE` | `translator` | 默认会话模式 |
+| `TWILIO_ACCOUNT_SID` | — | Twilio 账号；通过 REST API 挂断通话和同步 webhook 都需要 |
+| `TWILIO_AUTH_TOKEN` | — | Twilio auth token（用途同上） |
+| `TWILIO_PHONE_NUMBER` | — | `/api/twilio-sync` 要更新 Voice webhook 的号码（E.164） |
 | `MAX_CONCURRENT_CALLS` | `5` | 最大同时通话数 |
-| `MAX_CALL_DURATION_MIN` | `30` | N 分钟后自动断开 |
-| `MAX_SILENCE_SEC` | `60` | 静音 N 秒后发出警告 |
-| `RATE_LIMIT_MAX_CALLS` | `10` | 每个号码在时间窗口内的最大通话数 |
+| `MAX_CALL_DURATION_MIN` | `30` | N 分钟后结束通话 |
+| `MAX_SILENCE_SEC` | `60` | 静音 N 秒后发出警告，2N 秒后结束通话 |
+| `RATE_LIMIT_MAX_CALLS` | `10` | 每个来电号码（`From`）在时间窗口内的最大通话数 |
 | `RATE_LIMIT_WINDOW_MIN` | `10` | 限流时间窗口（分钟） |
+| `WHISPER_LANGUAGE_HINT` | 空（自动检测） | 给 `gpt-realtime-whisper` 输入转写的 ISO 639-1 语言提示 |
+| `ENABLE_TRANSCRIPT_CLEANING` | `false` | 用 GPT-4o-mini 纠正来电者转写（`transcript-cleaner.js`），不影响音频 |
 | `SESSION_TTL_MINUTES` | `60` | 已结束会话在内存中的保留时长 |
 | `AUDIT_LOG_PATH` | `data/audit.log` | 审计日志文件路径 |
 | `DEBUG_LOG_TRANSCRIPTS` | `false` | 在控制台打印转写文本（注意：含 PHI） |
@@ -305,19 +331,22 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 ```
 Twilio sends:   u-law (G.711) 8kHz mono → base64 in JSON
 Server:         pass-through (no decode/encode)
-OpenAI:         g711_ulaw 8kHz native support
-Response:       g711_ulaw → base64 in JSON
+OpenAI:         audio/pcmu (G.711 u-law 8kHz) for input and output
+Response:       audio/pcmu → base64 in JSON
 Twilio plays:   u-law 8kHz directly to phone
 ```
+
+来电者的转写由会话的输入转写模型 `gpt-realtime-whisper` 生成（设置了 `WHISPER_LANGUAGE_HINT` 时会按该语言做偏置，还可以再交给 `transcript-cleaner.js` 纠错）。
 
 ### 回声抑制
 
 没有硬件回声消除的电话，麦克风会把 AI 的 TTS 输出也录进去。`openai-client.js` 中的回声门控（echo gate）负责处理这个问题：
 
 1. AI 开始说话 -> `aiSpeaking = true` -> 丢弃所有上行音频
-2. AI 说完 -> 800ms 缓冲期 -> `aiSpeaking = false` -> 恢复转发
+2. AI 说完 -> 缓冲期（translator 模式 **800 ms**，intake 模式 **2000 ms**）-> `aiSpeaking = false` -> 恢复转发
+3. intake 模式在 AI 说开场问候之前就先关上门控，避免上行音频打断问候
 
-这实际上在翻译期间关闭了插话打断（barge-in）。医疗口译中准确比可打断更重要，所以这样做是对的。
+这实际上在 AI 说话期间关闭了插话打断（barge-in）。医疗口译中准确比可打断更重要，所以这样做是对的。使用 `gpt-realtime-translate` 时不启用门控：它走单独的翻译端点，上行音频始终照常转发。
 
 ---
 
@@ -439,8 +468,8 @@ docker run -p 5050:5050 --env-file .env ai-medical-interpreter
 | Web 框架 | Express 4 |
 | WebSocket | ws 8 |
 | 电话网关 | Twilio Voice + Media Streams |
-| AI（实时） | OpenAI Realtime API (gpt-4o-realtime) |
-| AI（文档） | OpenAI GPT-4o Chat Completions |
+| AI（实时） | OpenAI Realtime API（默认 `gpt-4o-realtime-preview`，可选 `gpt-realtime`、`gpt-realtime-2`、`gpt-realtime-translate`），`gpt-realtime-whisper` 转写 |
+| AI（文档） | OpenAI GPT-4o Chat Completions（可选的转写纠错用 GPT-4o-mini） |
 | 前端 | 原生 HTML/JS/CSS（不使用框架） |
 | 部署 | Docker, nginx, AWS EC2 |
 

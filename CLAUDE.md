@@ -81,9 +81,16 @@ Twilio strips query params from Stream WebSocket URLs. Mode, model and the calle
 
 Three tiers: rate limiting (per-number, checked in the webhook, recorded at stream start) → duration cap (`MAX_CALL_DURATION_MIN`) → silence detection (warn at `MAX_SILENCE_SEC`, hang up at 2×). Both hang-ups go through `endCall()` in `twilio-handler.js`: close OpenAI and end the session, complete the call via the Twilio REST API (`Status=completed`), then close the media stream; the `<Hangup/>` after `<Connect>` ends the call if the REST request is skipped or fails.
 
+### Access control (`src/auth.js`)
+
+`src/app.js` builds the Express app + WebSocket routing (`createAppServer()`, used by tests); `src/server.js` runs the startup security check and listens.
+
+- `/api/*` needs `Authorization: Bearer <DASHBOARD_TOKEN>` (constant-time compare). `/dashboard/ws` gets the token in `Sec-WebSocket-Protocol` as `auth.<base64url(token)>` next to `dashboard.v1` (browsers can't set WS headers). Without `DASHBOARD_TOKEN` both return 503; with `NODE_ENV=production` the server refuses to start. The static dashboard shell and `/health` stay public; the page asks for the token and keeps it in `sessionStorage`.
+- `/twilio/incoming-call` and the `/twilio/media-stream` upgrade verify `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set. The signed URL is rebuilt from `X-Forwarded-Host` / `Host` / `PUBLIC_HOST` (https/http for the webhook, wss for the stream); mismatches return 403 and are logged with the URLs tried. `TWILIO_SKIP_SIGNATURE_CHECK=true` disables this for debugging.
+
 ## Config
 
-All via `.env` (see `.env.example`). Only `OPENAI_API_KEY` is required. `config.js` fails fast on missing required keys. Key non-obvious configs:
+All via `.env` (see `.env.example`). `OPENAI_API_KEY` is required to start; `DASHBOARD_TOKEN` is required for the dashboard/API (and to start at all with `NODE_ENV=production`). `config.js` fails fast on missing required keys. Key non-obvious configs:
 
 - `PUBLIC_HOST` — ngrok hostname, auto-detected from request headers if not set
 - `WHISPER_LANGUAGE_HINT` — ISO 639-1 code to bias ASR (helps with code-switching)

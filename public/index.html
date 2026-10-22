@@ -89,6 +89,17 @@
     </div>
   </div>
 
+  <!-- Sign-in (the dashboard API and live transcript need DASHBOARD_TOKEN) -->
+  <div id="login-overlay" class="login-overlay" hidden>
+    <form id="login-form" class="login-card">
+      <h2>Sign in</h2>
+      <p>Enter the dashboard token (<code>DASHBOARD_TOKEN</code> in the server's <code>.env</code>). It is kept only for this browser tab.</p>
+      <input id="login-token" type="password" autocomplete="current-password" placeholder="Dashboard token" required>
+      <p id="login-error" class="login-error"></p>
+      <button type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+  </div>
+
   <script src="dashboard.js"></script>
 </body>
 </html>

@@ -6,11 +6,83 @@ let currentSessionId = null;
 let autoScroll = true;
 let restLoaded = false;
 
+// --- Auth ------------------------------------------------------------------
+// The API and the live transcript need the server's DASHBOARD_TOKEN. It is
+// kept in sessionStorage (this tab only) and sent as a Bearer header; the
+// WebSocket carries it in its subprotocol list, since browsers can't set
+// headers on a WebSocket.
+
+const TOKEN_KEY = 'dashboardToken';
+let memoryToken = '';
+
+function getToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || memoryToken; } catch { return memoryToken; }
+}
+
+function setToken(token) {
+  memoryToken = token;
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* storage unavailable: keep it in memory */ }
+}
+
+function showLogin(message) {
+  if (message !== undefined) $('#login-error').textContent = message;
+  if ($('#login-overlay').hidden) {
+    $('#login-overlay').hidden = false;
+    $('#login-token').focus();
+  }
+}
+
+class AuthError extends Error {}
+
+/** fetch() for /api/*: adds the token and opens the sign-in form on 401/503. */
+async function api(path, options = {}) {
+  const token = getToken();
+  if (!token) {
+    showLogin();
+    throw new AuthError('Not signed in');
+  }
+  const res = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) {
+    setToken('');
+    showLogin('That token was not accepted.');
+    throw new AuthError('Unauthorized');
+  }
+  if (res.status === 503) {
+    showLogin('The dashboard is disabled on the server: set DASHBOARD_TOKEN in its .env and restart it.');
+    throw new AuthError('Dashboard disabled');
+  }
+  return res;
+}
+
+function dashboardSocketProtocols() {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(getToken())) binary += String.fromCharCode(byte);
+  const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return ['dashboard.v1', `auth.${encoded}`];
+}
+
+$('#login-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const token = $('#login-token').value.trim();
+  if (!token) return;
+  setToken(token);
+  $('#login-token').value = '';
+  $('#login-error').textContent = '';
+  $('#login-overlay').hidden = true;
+  init();
+});
+
 // --- Session list ----------------------------------------------------------
 
 async function fetchSessions() {
   try {
-    const res = await fetch('/api/sessions');
+    const res = await api('/api/sessions');
     const sessions = await res.json();
     renderSessionList(sessions);
 
@@ -65,7 +137,7 @@ async function connectToSession(sessionId) {
 
   setConnectionStatus('connecting');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/dashboard/ws?sessionId=${sessionId}`);
+  ws = new WebSocket(`${proto}://${location.host}/dashboard/ws?sessionId=${sessionId}`, dashboardSocketProtocols());
 
   ws.onopen = () => setConnectionStatus('connected');
 
@@ -111,7 +183,7 @@ async function connectToSession(sessionId) {
 
 async function loadSessionViaREST(sessionId) {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}`);
+    const res = await api(`/api/sessions/${sessionId}`);
     if (!res.ok) return;
     const state = await res.json();
     updateSessionInfo(state);
@@ -247,7 +319,7 @@ function updateSessionInfo(state) {
 
 async function fetchAndRenderDocument(sessionId) {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/document`);
+    const res = await api(`/api/sessions/${sessionId}/document`);
     if (!res.ok) return;
     const doc = await res.json();
     renderDocument(doc);
@@ -409,7 +481,7 @@ function copyDocument() {
 async function buildWebhookUrl() {
   const mode = $('#mode-select').value;
   const model = $('#model-select').value;
-  const res = await fetch('/api/public-host');
+  const res = await api('/api/public-host');
   const { host } = await res.json();
   let url = `https://${host}/twilio/incoming-call?mode=${mode}`;
   if (model) url += `&model=${model}`;
@@ -424,7 +496,7 @@ async function syncToTwilio() {
   status.textContent = '';
 
   try {
-    const res = await fetch('/api/twilio-sync', {
+    const res = await api('/api/twilio-sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ webhookUrl: await buildWebhookUrl() }),
@@ -452,7 +524,7 @@ async function runDemo() {
   btn.textContent = 'Creating...';
   btn.disabled = true;
   try {
-    const res = await fetch('/api/demo', { method: 'POST' });
+    const res = await api('/api/demo', { method: 'POST' });
     const data = await res.json();
     await fetchSessions();
     $('#session-select').value = data.sessionId;
@@ -485,9 +557,13 @@ $('#copy-btn')?.addEventListener('click', copyDocument);
 
 $('#refresh-btn')?.addEventListener('click', fetchSessions);
 
-setInterval(fetchSessions, 5000);
+setInterval(() => { if (getToken()) fetchSessions(); }, 5000);
 
-(async function init() {
+async function init() {
+  if (!getToken()) {
+    showLogin();
+    return;
+  }
   const sessions = await fetchSessions();
   const params = new URLSearchParams(location.search);
   const id = params.get('sessionId');
@@ -499,4 +575,6 @@ setInterval(fetchSessions, 5000);
     $('#session-select').value = active.id;
     await connectToSession(active.id);
   }
-})();
+}
+
+init();

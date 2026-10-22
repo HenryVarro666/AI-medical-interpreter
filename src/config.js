@@ -33,10 +33,19 @@ export const config = {
   speakerALang: process.env.SPEAKER_A_LANG || 'Chinese',
   speakerBLang: process.env.SPEAKER_B_LANG || 'English',
 
-  // Twilio (for auto-sync webhook URL)
+  // Twilio: REST API (hang-up, webhook sync) and request-signature checks
   twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
   twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
   twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+  // Debugging escape hatch only: accept Twilio requests without checking
+  // X-Twilio-Signature even though TWILIO_AUTH_TOKEN is set.
+  twilioSkipSignatureCheck: process.env.TWILIO_SKIP_SIGNATURE_CHECK === 'true',
+
+  // Secret for the dashboard and /api/* (sent as a Bearer token). Without
+  // it those endpoints are disabled, and with NODE_ENV=production the
+  // server refuses to start.
+  dashboardToken: process.env.DASHBOARD_TOKEN || '',
+  isProduction: process.env.NODE_ENV === 'production',
 
   // Voice cloning bridge (future)
   enableVoiceClone: process.env.ENABLE_VOICE_CLONE === 'true',

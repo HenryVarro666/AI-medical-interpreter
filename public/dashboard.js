@@ -473,7 +473,6 @@ $('#mode-select')?.addEventListener('change', () => {
   } else {
     modelSelect.value = 'gpt-realtime-2';
   }
-  if ($('#webhook-display').style.display !== 'none') generateWebhookUrl();
 });
 
 // --- Init ------------------------------------------------------------------

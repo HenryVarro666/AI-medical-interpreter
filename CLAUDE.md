@@ -79,7 +79,7 @@ Twilio strips query params from Stream WebSocket URLs. Mode, model and the calle
 
 ### Call Guard
 
-Three tiers: rate limiting (per-number) → duration cap → silence detection (warn at 60s, hangup at 120s via Twilio REST API).
+Three tiers: rate limiting (per-number, checked in the webhook, recorded at stream start) → duration cap (`MAX_CALL_DURATION_MIN`) → silence detection (warn at `MAX_SILENCE_SEC`, hang up at 2×). Both hang-ups go through `endCall()` in `twilio-handler.js`: close OpenAI and end the session, complete the call via the Twilio REST API (`Status=completed`), then close the media stream; the `<Hangup/>` after `<Connect>` ends the call if the REST request is skipped or fails.
 
 ## Config
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   FakeTwilioSocket, FakeOpenAIClient, mockFetch, flush,
   webhookRequest, webhookResponse, streamParameters, startMessage,
+  mediaMessage, ulawChunk,
 } from './helpers/fakes.js';
 
 const { config } = await import('../src/config.js');
@@ -144,4 +145,27 @@ test('a failed REST hang-up still closes the stream and OpenAI', async (t) => {
   assert.equal(fetchMock.twilioCalls.length, 1);
   assert.equal(openai.closed, true);
   assert.equal(ws.readyState, ws.CLOSED);
+});
+
+test('extended silence ends the call once, the same way as max duration', async (t) => {
+  resetTwilio(t);
+  const { ws, openai } = await openStream(incomingCall('+15556660000', 'CA-silent'), 'CA-silent');
+
+  const hangupAfter = Math.round((config.maxSilenceDurationSec * 2) / 0.02) + 1;
+  for (let i = 0; i < hangupAfter + 50; i++) await ws.deliver(mediaMessage(ulawChunk(0xFF)));
+  await flush();
+
+  assert.equal(fetchMock.twilioCalls.length, 1, 'one REST hang-up, not one per chunk');
+  assert.equal(fetchMock.twilioCalls[0].init.body, 'Status=completed');
+  assert.equal(openai.closed, true);
+  assert.equal(ws.readyState, ws.CLOSED);
+  assert.deepEqual(ws.closeCalls[0], { code: 1000, reason: 'extended_silence' });
+  assert.equal(getCallStats().activeCalls, 0);
+  assert.ok(openai.audio.length < hangupAfter, 'no audio forwarded after the hang-up');
+
+  const system = sessionFor('CA-silent').transcripts.filter(e => e.role === 'system').map(e => e.text);
+  assert.deepEqual(system, [
+    '[Extended silence detected — no speech received]',
+    '[Call ended due to extended silence]',
+  ]);
 });

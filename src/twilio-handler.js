@@ -119,7 +119,6 @@ export function handleMediaStream(ws, req, {
   let callKey = null; // id this call is registered under in call-guard
   let openai = null;
   let session = null;
-  let silenceWarned = false;
   let ending = false;
   let mode = config.defaultMode;
   let modelOverride = null;
@@ -220,13 +219,10 @@ export function handleMediaStream(ws, req, {
         if (openai?.isReady()) {
           const guard = trackAudioChunk(callKey, msg.media.payload);
           if (guard.action === 'hangup_silence') {
-            sessionManager.addTranscript(session?.id, {
-              role: 'system',
-              text: '[Call ended due to extended silence]',
-            });
-            hangupCall(callSid);
-          } else if (guard.action === 'warn_silence' && !silenceWarned) {
-            silenceWarned = true;
+            endCall('extended_silence', '[Call ended due to extended silence]');
+            break;
+          }
+          if (guard.action === 'warn_silence') {
             sessionManager.addTranscript(session?.id, {
               role: 'system',
               text: '[Extended silence detected — no speech received]',

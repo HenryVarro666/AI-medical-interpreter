@@ -50,6 +50,8 @@ export function registerCall(callSid, callerNumber, { onMaxDuration } = {}) {
     onMaxDuration,
     silentChunks: 0,
     totalChunks: 0,
+    silenceWarned: false,
+    silenceHangup: false,
   });
 
   // Keep only calls inside the window; the newest rateLimitMaxCalls of them
@@ -67,9 +69,15 @@ export function unregisterCall(callSid) {
   }
 }
 
+/**
+ * Feed one inbound 20 ms media chunk. Returns 'warn_silence' once per silent
+ * stretch longer than MAX_SILENCE_SEC, and 'hangup_silence' once when it
+ * passes 2 x MAX_SILENCE_SEC (the caller must then end the call); otherwise
+ * 'continue'. Each is audit-logged once, not on every chunk.
+ */
 export function trackAudioChunk(callSid, payload) {
   const entry = activeCalls.get(callSid);
-  if (!entry) return { action: 'continue' };
+  if (!entry || entry.silenceHangup) return { action: 'continue' };
 
   entry.totalChunks++;
 
@@ -78,14 +86,17 @@ export function trackAudioChunk(callSid, payload) {
     entry.silentChunks++;
   } else {
     entry.silentChunks = 0;
+    entry.silenceWarned = false;
   }
 
   const silentSeconds = entry.silentChunks * 0.02;
   if (silentSeconds > config.maxSilenceDurationSec * 2) {
+    entry.silenceHangup = true;
     logAudit('call_force_ended', null, entry.callerNumber, { reason: 'extended_silence_hangup' });
     return { action: 'hangup_silence' };
   }
-  if (silentSeconds > config.maxSilenceDurationSec) {
+  if (silentSeconds > config.maxSilenceDurationSec && !entry.silenceWarned) {
+    entry.silenceWarned = true;
     logAudit('call_warning', null, entry.callerNumber, { reason: 'extended_silence' });
     return { action: 'warn_silence' };
   }

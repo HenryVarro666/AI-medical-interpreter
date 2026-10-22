@@ -2,7 +2,16 @@ import { config } from './config.js';
 import { logAudit } from './audit-logger.js';
 
 const activeCalls = new Map();
+// callerNumber -> start times of that number's calls inside the rate-limit window
 const callHistory = new Map();
+
+function recentCallTimes(callerNumber, now = Date.now()) {
+  const cutoff = now - config.rateLimitWindowMs;
+  const recent = (callHistory.get(callerNumber) || []).filter(t => t > cutoff);
+  if (recent.length > 0) callHistory.set(callerNumber, recent);
+  else callHistory.delete(callerNumber);
+  return recent;
+}
 
 export function checkCallAllowed(callSid, callerNumber) {
   if (activeCalls.size >= config.maxConcurrentCalls) {
@@ -10,10 +19,7 @@ export function checkCallAllowed(callSid, callerNumber) {
     return { allowed: false, reason: 'System is at capacity. Please try again later.' };
   }
 
-  const history = callHistory.get(callerNumber) || [];
-  const recentWindow = Date.now() - config.rateLimitWindowMs;
-  const recentCalls = history.filter(t => t > recentWindow);
-  if (recentCalls.length >= config.rateLimitMaxCalls) {
+  if (recentCallTimes(callerNumber).length >= config.rateLimitMaxCalls) {
     logAudit('call_rejected', null, callerNumber, { reason: 'rate_limited' });
     return { allowed: false, reason: 'Too many recent calls. Please wait and try again.' };
   }
@@ -21,22 +27,32 @@ export function checkCallAllowed(callSid, callerNumber) {
   return { allowed: true };
 }
 
+/**
+ * Track a call whose media stream has started and count it against the
+ * caller's rate limit.
+ * @param {string} callSid  Twilio CallSid (StreamSid if Twilio sent none)
+ * @param {string} callerNumber  Twilio `From`, passed to the media stream as
+ *   the `from` <Parameter>; must match what checkCallAllowed() was given
+ */
 export function registerCall(callSid, callerNumber) {
+  const now = Date.now();
   const timer = setTimeout(() => {
     forceEndCall(callSid);
   }, config.maxCallDurationMs);
 
   activeCalls.set(callSid, {
     callerNumber,
-    startedAt: Date.now(),
+    startedAt: now,
     timer,
     silentChunks: 0,
     totalChunks: 0,
   });
 
-  const history = callHistory.get(callerNumber) || [];
-  history.push(Date.now());
-  callHistory.set(callerNumber, history.slice(-20));
+  // Keep only calls inside the window; the newest rateLimitMaxCalls of them
+  // are all the check needs (a fixed cap here would hide larger limits).
+  const history = recentCallTimes(callerNumber, now);
+  history.push(now);
+  callHistory.set(callerNumber, history.slice(-Math.max(config.rateLimitMaxCalls, 1)));
 }
 
 export function unregisterCall(callSid) {

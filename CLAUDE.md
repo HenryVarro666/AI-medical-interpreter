@@ -7,10 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run dev          # Start with auto-reload (node --watch)
 npm start            # Production start
+npm test             # node:test suite in test/ (Twilio, OpenAI and fetch are faked)
 ngrok http 5050      # Expose locally for Twilio (separate terminal)
 ```
 
-No build step, no tests, no linter. ES modules throughout (Node >= 20).
+No build step, no linter. ES modules throughout (Node >= 20).
 
 ## Architecture
 
@@ -74,7 +75,7 @@ Sessions persist to `data/sessions/<uuid>.json` on completion. Loaded back on se
 
 ### Twilio Parameter Passing
 
-Twilio strips query params from Stream WebSocket URLs. Mode and model are passed via `<Parameter>` TwiML elements and read from `msg.start.customParameters` in the `start` event.
+Twilio strips query params from Stream WebSocket URLs. Mode, model and the caller number (`from`, used for per-number rate limiting) are passed via `<Parameter>` TwiML elements and read from `msg.start.customParameters` in the `start` event.
 
 ### Call Guard
 

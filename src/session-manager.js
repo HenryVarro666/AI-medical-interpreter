@@ -13,7 +13,8 @@ class SessionManager extends EventEmitter {
     super();
     this.sessions = new Map();
 
-    setInterval(() => this._cleanup(), 60_000);
+    // Housekeeping only: don't keep the process alive (the HTTP server does).
+    setInterval(() => this._cleanup(), 60_000).unref();
   }
 
   createSession(streamSid, callSid, mode = 'translator') {

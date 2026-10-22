@@ -3,6 +3,13 @@ import { config } from './config.js';
 import { sessionManager } from './session-manager.js';
 import { checkCallAllowed, registerCall, unregisterCall, trackAudioChunk } from './call-guard.js';
 
+const XML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
+
+// Request values (From, mode, model) end up inside TwiML attributes.
+function escapeXml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => XML_ESCAPES[ch]);
+}
+
 async function hangupCall(callSid) {
   if (!callSid || !config.twilioAccountSid || !config.twilioAuthToken) return;
   try {
@@ -35,7 +42,7 @@ export function handleIncomingCall(req, res) {
   if (!guard.allowed) {
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say>${guard.reason}</Say>
+  <Say>${escapeXml(guard.reason)}</Say>
   <Hangup/>
 </Response>`;
     res.type('text/xml').send(twiml);
@@ -52,13 +59,17 @@ export function handleIncomingCall(req, res) {
     ? 'Connecting you to the medical intake system. A specialist will collect your information.'
     : 'Connecting you to the AI translator. Please start speaking.';
 
+  // Twilio drops query strings from the Stream URL, so everything the media
+  // stream needs (including the caller number for per-number rate limiting)
+  // goes through <Parameter> and arrives in start.customParameters.
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say>${greeting}</Say>
+  <Say>${escapeXml(greeting)}</Say>
   <Connect>
-    <Stream url="${wsUrl}">
-      <Parameter name="mode" value="${mode}" />
-      <Parameter name="model" value="${model}" />
+    <Stream url="${escapeXml(wsUrl)}">
+      <Parameter name="mode" value="${escapeXml(mode)}" />
+      <Parameter name="model" value="${escapeXml(model)}" />
+      <Parameter name="from" value="${escapeXml(callerNumber)}" />
     </Stream>
   </Connect>
 </Response>`;
@@ -67,7 +78,15 @@ export function handleIncomingCall(req, res) {
   res.type('text/xml').send(twiml);
 }
 
-export function handleMediaStream(ws, req) {
+/**
+ * @param {import('ws').WebSocket} ws  Twilio Media Streams socket
+ * @param {import('http').IncomingMessage} req
+ * @param {{ createOpenAIClient?: (mode: string, model: string | null) => OpenAIRealtimeClient }} [deps]
+ *   Injection point for tests; the server passes only (ws, req).
+ */
+export function handleMediaStream(ws, req, {
+  createOpenAIClient = (mode, model) => new OpenAIRealtimeClient(mode, model),
+} = {}) {
   console.log(`[twilio] Media stream WS opened`);
 
   let streamSid = null;
@@ -117,13 +136,16 @@ export function handleMediaStream(ws, req) {
         const params = msg.start.customParameters || {};
         mode = params.mode || config.defaultMode;
         modelOverride = params.model || null;
+        // Same value checkCallAllowed() saw in the webhook, so the history
+        // recorded here is what the next call from this number is checked against.
+        const callerNumber = params.from || 'unknown';
 
         console.log(`[twilio] stream started: ${streamSid} | mode=${mode} model=${modelOverride || 'default'}`);
 
-        registerCall(callSid || streamSid, 'unknown');
+        registerCall(callSid || streamSid, callerNumber);
         session = sessionManager.createSession(streamSid, callSid, mode);
 
-        openai = new OpenAIRealtimeClient(mode, modelOverride);
+        openai = createOpenAIClient(mode, modelOverride);
         openai.on('audio', forwardAudio);
         openai.on('transcript', (entry) => {
           sessionManager.addTranscript(session.id, entry);

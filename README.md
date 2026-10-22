@@ -44,7 +44,7 @@ A caller dials in, speaks Chinese — the other side hears English. Speaks Engli
 
 ### Live Dashboard
 
-While a call is active, open `http://localhost:5050` in a browser:
+While a call is active, open `http://localhost:5050` in a browser and sign in with the `DASHBOARD_TOKEN` from `.env`:
 
 - **Real-time bilingual transcript** — caller (blue) and translation/AI (green) with timestamps, streaming word-by-word
 - **SOAP note auto-generation** — 5-10 seconds after call ends, a structured medical document appears with:
@@ -52,7 +52,7 @@ While a call is active, open `http://localhost:5050` in a browser:
   - Assessment with differential diagnosis
   - Plan with recommendations, follow-up, referrals
   - Structured entity extraction (symptoms, medications, allergies, diagnoses, procedures)
-- **HIPAA audit trail** — all data access logged to `data/audit.log`
+- **HIPAA audit trail** — all data access (and every rejected sign-in) logged to `data/audit.log`
 
 ### Call Protection
 
@@ -114,7 +114,7 @@ flowchart TD
     SM -->|"save, audit"| STORE
 ```
 
-Read it top to bottom: call audio goes phone → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime and back the same way as base64 μ-law, with no transcoding. Transcript events fan out from `session-manager.js` to the dashboard over WebSocket; when the call ends, `doc-generator.js` sends the transcript to GPT-4o and the SOAP note is saved with the session. When `call-guard.js` reports the duration cap or extended silence, `twilio-handler.js` ends the call through Twilio's REST API.
+Read it top to bottom: call audio goes phone → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime and back the same way as base64 μ-law, with no transcoding. Transcript events fan out from `session-manager.js` to the dashboard over WebSocket; when the call ends, `doc-generator.js` sends the transcript to GPT-4o and the SOAP note is saved with the session. When `call-guard.js` reports the duration cap or extended silence, `twilio-handler.js` ends the call through Twilio's REST API. Not drawn: `auth.js` checks Twilio's signature on the webhook and media stream, and the dashboard token on `/api/*` and `/dashboard/ws`.
 
 <details>
 <summary>Text version of the diagram</summary>
@@ -181,7 +181,11 @@ cp .env.example .env
 # Edit .env — at minimum set OPENAI_API_KEY
 ```
 
-Also set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` so the server can end calls through the Twilio REST API (duration cap, silence hang-up), and `TWILIO_PHONE_NUMBER` to sync the webhook from the dashboard.
+Then set:
+
+- `DASHBOARD_TOKEN` — a long random secret (`openssl rand -hex 32`). The dashboard asks for it; without it the dashboard API and live transcript are disabled, and with `NODE_ENV=production` the server refuses to start.
+- `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` — so the server can end calls through the Twilio REST API (duration cap, silence hang-up) and reject webhook and media-stream requests that are not signed by Twilio.
+- `TWILIO_PHONE_NUMBER` — to sync the webhook from the dashboard.
 
 ### Run
 
@@ -202,7 +206,7 @@ For intake mode, append `?mode=intake` to the webhook URL.
 
 ### Test
 
-1. Open `http://localhost:5050` in a browser (dashboard)
+1. Open `http://localhost:5050` in a browser (dashboard) and sign in with `DASHBOARD_TOKEN`
 2. Call your Twilio number from a phone
 3. Speak — see live transcript appear in the browser
 4. Hang up — SOAP note generates automatically
@@ -220,7 +224,9 @@ npm test
 ```
 .
 ├── src/
-│   ├── server.js              # Express HTTP + dual WebSocket entry point
+│   ├── server.js              # Entry point: security startup check + listen
+│   ├── app.js                 # Express routes + dual WebSocket upgrade routing
+│   ├── auth.js                # Dashboard token + Twilio signature checks
 │   ├── twilio-handler.js      # TwiML, Media Streams ↔ OpenAI bridge, call hang-up
 │   ├── openai-client.js       # OpenAI Realtime WebSocket client + echo gate
 │   ├── session-manager.js     # Call session registry + transcript fan-out
@@ -256,6 +262,8 @@ npm test
 
 ## API Endpoints
 
+Access: every `/api/*` route needs `Authorization: Bearer <DASHBOARD_TOKEN>` (401 without it, 503 if the server has no token set). `/twilio/*` requests must carry a valid `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set (403 otherwise). `/health` and the dashboard page itself are public; the page holds no data until you sign in.
+
 ### HTTP
 
 | Endpoint | Method | Description |
@@ -275,8 +283,8 @@ npm test
 
 | Endpoint | Protocol | Description |
 |----------|----------|-------------|
-| `/twilio/media-stream` | Twilio Media Streams | Bidirectional call audio |
-| `/dashboard/ws?sessionId=<id>` | JSON messages | Live transcript stream |
+| `/twilio/media-stream` | Twilio Media Streams | Bidirectional call audio (upgrade checked with `X-Twilio-Signature`) |
+| `/dashboard/ws?sessionId=<id>` | JSON messages | Live transcript stream (subprotocols `dashboard.v1` and `auth.<base64url(DASHBOARD_TOKEN)>`) |
 
 ### Query Parameters
 
@@ -296,6 +304,7 @@ All configuration via environment variables (see `.env.example`):
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | OpenAI API key with Realtime API access |
+| `DASHBOARD_TOKEN` | Secret for the dashboard and `/api/*`. Without it they are disabled (503); with `NODE_ENV=production` the server won't start |
 
 ### Optional
 
@@ -308,8 +317,10 @@ All configuration via environment variables (see `.env.example`):
 | `SPEAKER_A_LANG` | `Chinese` | First language |
 | `SPEAKER_B_LANG` | `English` | Second language |
 | `DEFAULT_MODE` | `translator` | Default session mode |
+| `NODE_ENV` | — | `production` makes a missing `DASHBOARD_TOKEN` fatal at startup |
 | `TWILIO_ACCOUNT_SID` | — | Twilio account; needed to hang up calls via the REST API and for webhook sync |
-| `TWILIO_AUTH_TOKEN` | — | Twilio auth token (same uses) |
+| `TWILIO_AUTH_TOKEN` | — | Twilio auth token: REST API (same uses) and `X-Twilio-Signature` verification |
+| `TWILIO_SKIP_SIGNATURE_CHECK` | `false` | Debugging only: accept Twilio requests without checking the signature |
 | `TWILIO_PHONE_NUMBER` | — | Number whose Voice webhook `/api/twilio-sync` updates (E.164) |
 | `MAX_CONCURRENT_CALLS` | `5` | Max simultaneous calls |
 | `MAX_CALL_DURATION_MIN` | `30` | End the call after N minutes |
@@ -408,10 +419,11 @@ Designed in, not fully implemented (this is a proof-of-concept):
 | Layer | Status | Detail |
 |-------|--------|--------|
 | Audit logging | Implemented | Append-only JSONL, all data access logged |
-| Transport encryption | In place | WSS for Twilio, OpenAI, and dashboard |
+| Transport encryption | In place | WSS for Twilio, OpenAI, and dashboard (serve the dashboard over HTTPS, e.g. ngrok or nginx + TLS, so the token isn't sent in clear) |
 | PHI log gating | Implemented | `DEBUG_LOG_TRANSCRIPTS` flag controls console output |
 | Data lifecycle | Partial | Ended sessions leave memory after `SESSION_TTL_MINUTES`, but every completed session (transcript and SOAP note) is written to `data/sessions/<id>.json` and reloaded at startup |
-| Access control | Architecture only | UUID-based session access (JWT/RBAC ready) |
+| Access control | Implemented (single operator) | Dashboard, `/api/*` and `/dashboard/ws` need `DASHBOARD_TOKEN` (constant-time check, failures audit-logged); the browser keeps it in `sessionStorage` for the tab. One shared secret: no per-user accounts or roles |
+| Request authenticity | Implemented | Voice webhook and media-stream upgrade verified with `X-Twilio-Signature` (HMAC-SHA1, `TWILIO_AUTH_TOKEN`) |
 | BAA agreements | Not in scope | Required for production (Twilio, OpenAI, hosting) |
 | Encryption at rest | Not in scope | Add for production deployment |
 
@@ -423,7 +435,7 @@ Designed in, not fully implemented (this is a proof-of-concept):
 
 ```bash
 docker build -t ai-medical-interpreter .
-docker run -p 5050:5050 --env-file .env ai-medical-interpreter
+docker run -p 5050:5050 --env-file .env -e NODE_ENV=production ai-medical-interpreter
 ```
 
 ### AWS (EC2 + nginx)
@@ -453,7 +465,7 @@ With voice cloning (ElevenLabs): ~$0.18/min (cheaper — saves on OpenAI audio o
 - [ ] **Dual-person Conference mode** — A speaks Chinese, B hears English; B speaks English, A hears Chinese (architecture designed in [docs/architecture.md](docs/architecture.md))
 - [ ] **Voice cloning** — custom TTS voices via ElevenLabs / Cartesia (interface defined in `tts-bridge.js`, roadmap in [docs/voice-cloning.md](docs/voice-cloning.md))
 - [ ] **EHR integration** — push SOAP notes to Epic/Cerner via FHIR
-- [ ] **User authentication** — JWT + RBAC for dashboard access control
+- [ ] **Per-user authentication** — individual accounts + RBAC instead of one shared `DASHBOARD_TOKEN`
 - [ ] **Multi-session monitoring** — admin view of all active calls
 - [ ] **Quality scoring** — post-call translation accuracy assessment
 - [ ] **Low-resource language fallback** — route to human interpreter when AI confidence is low

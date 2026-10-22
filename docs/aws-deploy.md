@@ -46,7 +46,13 @@ cp .env.example .env
 #   OPENAI_API_KEY=sk-...
 #   PUBLIC_HOST=your-demo.com
 #   DEBUG_LOG_TRANSCRIPTS=false
+#   NODE_ENV=production                # 缺少 DASHBOARD_TOKEN 时拒绝启动
+#   DASHBOARD_TOKEN=<openssl rand -hex 32 的输出>
+#   TWILIO_ACCOUNT_SID=AC...           # REST 挂断 + webhook 同步
+#   TWILIO_AUTH_TOKEN=...              # 同时用于校验 X-Twilio-Signature
 ```
+
+> nginx 配置里的 `proxy_set_header Host $host;` 不能删：Twilio 签名校验要用 Twilio 实际请求的主机名重建 URL。
 
 ### 4. nginx 反向代理（WebSocket 支持）
 

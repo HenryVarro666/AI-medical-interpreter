@@ -72,12 +72,20 @@ Realtime 模型默认"健谈"，给它一句音频它会当作问题回答。我
 
 | 文件 | 职责 |
 |---|---|
-| `src/server.js` | HTTP + WS 监听入口；路由挂载；启动日志 |
+| `src/server.js` | 入口：启动时安全配置检查、监听端口、启动日志 |
+| `src/app.js` | Express 路由挂载 + HTTP/WS 升级路由（`createAppServer()`） |
+| `src/auth.js` | 看板令牌（`DASHBOARD_TOKEN`）校验 + Twilio 请求签名（`X-Twilio-Signature`）校验 |
 | `src/twilio-handler.js` | TwiML 生成、Twilio Media Streams 协议解析、事件路由 |
 | `src/openai-client.js` | OpenAI Realtime WebSocket 连接、`session.update` 配置、事件转发 |
 | `src/tts-bridge.js` | 音色克隆接口占位；当前抛错提醒未实现 |
 | `src/prompts.js` | 翻译官系统提示词（语言对可通过 env 配置） |
 | `src/config.js` | `.env` 解析 + 必填项校验 |
+
+### 访问控制
+
+- **看板与 API**：`/api/*` 需要 `Authorization: Bearer <DASHBOARD_TOKEN>`；`/dashboard/ws` 在升级请求的 `Sec-WebSocket-Protocol` 里携带令牌（`auth.<base64url>`），因为浏览器不能给 WebSocket 加请求头。未设置令牌时这两类入口返回 503，`NODE_ENV=production` 时服务端拒绝启动。
+- **Twilio 入口**：设置了 `TWILIO_AUTH_TOKEN` 时，`/twilio/incoming-call` 和 `/twilio/media-stream` 的升级请求都要通过 `X-Twilio-Signature` 校验，否则返回 403。签名针对 Twilio 实际请求的 URL，服务端按 `X-Forwarded-Host` / `Host` / `PUBLIC_HOST` 重建，所以反向代理要保留 Host 头。
+- 只有一个共享密钥，没有按用户的账号和角色；看板请通过 HTTPS 访问，避免令牌明文传输。
 
 ## 5. 数据流（单次"用户说一句话"的生命周期）
 

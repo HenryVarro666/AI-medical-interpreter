@@ -20,6 +20,7 @@
 - 通话结束自动生成 SOAP 格式医疗文档
 - 混合语言（code-switching）支持
 - HIPAA 合规审计日志
+- 访问控制：看板与 `/api/*` 需要 `DASHBOARD_TOKEN`；Twilio webhook 与媒体流校验 `X-Twilio-Signature`
 - 通话保护（速率限制 / 时长上限 / 静音检测自动挂断）
 - Session 持久化（通话记录 + 文档自动保存到磁盘）
 - 一键 Twilio Webhook 同步（无需手动登录 Twilio Console）
@@ -47,7 +48,9 @@
 ```
 AI_phone_call/
 ├── src/
-│   ├── server.js              # Express + 双 WebSocket 入口
+│   ├── server.js              # 入口：启动时安全配置检查 + 监听端口
+│   ├── app.js                 # Express 路由 + 双 WebSocket 升级路由（createAppServer）
+│   ├── auth.js                # 看板令牌校验 + Twilio 请求签名校验
 │   ├── twilio-handler.js      # Twilio Media Streams 桥接 + 参数传递
 │   ├── openai-client.js       # OpenAI Realtime 客户端（多模型/多模式）
 │   ├── session-manager.js     # 会话管理 + 转录广播 + 磁盘持久化
@@ -274,8 +277,24 @@ active → ended → documenting → completed
 | `/twilio/media-stream` | Twilio 音频流 |
 | `/dashboard/ws?sessionId=<id>` | 实时转录推送 |
 
+### 访问控制（auth.js）
+
+| 入口 | 校验方式 | 失败时 |
+|------|---------|--------|
+| `/api/*` | `Authorization: Bearer <DASHBOARD_TOKEN>`，常数时间比较 | 401（写审计日志）；服务端未设置令牌时 503 |
+| `/dashboard/ws` | 升级请求的 `Sec-WebSocket-Protocol` 中携带 `auth.<base64url(令牌)>`，服务端只回 `dashboard.v1` | 401 / 503 |
+| `/twilio/incoming-call`（GET/POST） | `X-Twilio-Signature`：HMAC-SHA1（`TWILIO_AUTH_TOKEN`），URL + 按名称排序的表单参数 | 403（日志列出尝试过的 URL） |
+| `/twilio/media-stream` 升级 | `X-Twilio-Signature`，签名对象为 `wss://` URL，无参数 | 403 |
+| `/`、`/health` | 公开（页面本身不含数据） | — |
+
+- 浏览器无法给 WebSocket 设置请求头，所以令牌放在子协议列表里。
+- 签名所用的 URL 由 `X-Forwarded-Host` / `Host` / `PUBLIC_HOST` 重建（webhook 试 https、http；媒体流试 wss、ws、https），必须和 Twilio 里配置的地址一致。
+- 未设置 `TWILIO_AUTH_TOKEN` 时不校验签名（启动时告警）；`TWILIO_SKIP_SIGNATURE_CHECK=true` 仅供调试。
+- 未设置 `DASHBOARD_TOKEN` 时，看板 API 和 WebSocket 一律返回 503；`NODE_ENV=production` 时直接拒绝启动。
+
 ### Dashboard 功能
 
+- 首次打开要求输入 `DASHBOARD_TOKEN`（只保存在当前标签页的 sessionStorage，令牌被拒时重新弹出）
 - 模式/模型选择 → 一键 Sync to Twilio
 - Session 下拉菜单（新通话自动跳转）
 - 实时转录（caller 蓝色 / translation 绿色 / system 黄色）
@@ -331,6 +350,8 @@ Intake 模式的转录因为是结构化问答，生成的 SOAP 文档信息更�
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `OPENAI_API_KEY` | 是 | — | OpenAI API 密钥 |
+| `DASHBOARD_TOKEN` | 是（看板/API） | — | 看板与 `/api/*` 的 Bearer 密钥；未设置则看板禁用，`NODE_ENV=production` 时拒绝启动 |
+| `NODE_ENV` | 否 | — | `production` 时缺少 `DASHBOARD_TOKEN` 视为致命错误 |
 | `PORT` | 否 | 5050 | 服务端口 |
 | `OPENAI_MODEL` | 否 | gpt-4o-realtime-preview-2024-12-17 | 默认 Realtime 模型 |
 | `VOICE` | 否 | alloy | TTS 音色 |
@@ -339,7 +360,8 @@ Intake 模式的转录因为是结构化问答，生成的 SOAP 文档信息更�
 | `SPEAKER_B_LANG` | 否 | English | 第二语言 |
 | `DEFAULT_MODE` | 否 | translator | 默认会话模式 |
 | `TWILIO_ACCOUNT_SID` | 否 | — | Twilio 凭证（自动同步用） |
-| `TWILIO_AUTH_TOKEN` | 否 | — | Twilio 凭证 |
+| `TWILIO_AUTH_TOKEN` | 否 | — | Twilio 凭证（REST 挂断、webhook 同步、`X-Twilio-Signature` 校验） |
+| `TWILIO_SKIP_SIGNATURE_CHECK` | 否 | false | 仅供调试：跳过 Twilio 签名校验 |
 | `TWILIO_PHONE_NUMBER` | 否 | — | Twilio 号码 |
 | `MAX_CONCURRENT_CALLS` | 否 | 5 | 最大并发通话 |
 | `MAX_CALL_DURATION_MIN` | 否 | 30 | 通话时长上限（分钟） |
@@ -373,4 +395,4 @@ Demo 用量（每天几通测试）月总成本约 $20-25（含 AWS EC2 $18）�
 3. 中英频繁句内切换 ASR 不稳定（Whisper 限制）
 4. Intake 模式 VAD 偶尔误触发（咳嗽/背景噪音），threshold 已调高到 0.75
 5. 音色克隆接口预留但未实现
-6. 无用户认证（UUID 作为访问令牌）
+6. 只有一个共享的 `DASHBOARD_TOKEN`，没有按用户的账号和角色（RBAC）

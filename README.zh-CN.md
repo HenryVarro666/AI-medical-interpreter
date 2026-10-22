@@ -44,7 +44,7 @@
 
 ### 实时看板
 
-通话进行时，在浏览器中打开 `http://localhost:5050`：
+通话进行时，在浏览器中打开 `http://localhost:5050`，用 `.env` 里的 `DASHBOARD_TOKEN` 登录：
 
 - **实时双语转写**：来电者（蓝色）与译文/AI（绿色）分色显示，带时间戳，逐词流式呈现
 - **自动生成 SOAP 病历**：通话结束 5-10 秒后，会出现一份结构化医疗文档，包含：
@@ -52,7 +52,7 @@
   - 评估，含鉴别诊断
   - 计划，含建议、随访、转诊
   - 结构化实体抽取（症状、药物、过敏、诊断、操作）
-- **HIPAA 审计追踪**：所有数据访问都会记录到 `data/audit.log`
+- **HIPAA 审计追踪**：所有数据访问（以及每次被拒绝的登录）都会记录到 `data/audit.log`
 
 ### 通话保护
 
@@ -114,7 +114,7 @@ flowchart TD
     SM -->|"保存与审计"| STORE
 ```
 
-从上往下看：通话音频沿 电话 → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime 传过去，再按原路以 base64 μ-law 传回，全程不做转码。转写事件由 `session-manager.js` 经 WebSocket 推送到看板；通话结束后，`doc-generator.js` 把转写发给 GPT-4o 生成 SOAP 病历，并随会话一起保存。当 `call-guard.js` 报告通话超时或长时间静音时，`twilio-handler.js` 通过 Twilio REST API 结束通话。
+从上往下看：通话音频沿 电话 → Twilio → `twilio-handler.js` → `openai-client.js` → OpenAI Realtime 传过去，再按原路以 base64 μ-law 传回，全程不做转码。转写事件由 `session-manager.js` 经 WebSocket 推送到看板；通话结束后，`doc-generator.js` 把转写发给 GPT-4o 生成 SOAP 病历，并随会话一起保存。当 `call-guard.js` 报告通话超时或长时间静音时，`twilio-handler.js` 通过 Twilio REST API 结束通话。图中未画出的是 `auth.js`：它在 webhook 和媒体流上校验 Twilio 签名，在 `/api/*` 和 `/dashboard/ws` 上校验看板令牌。
 
 <details>
 <summary>架构图的纯文本版</summary>
@@ -181,7 +181,11 @@ cp .env.example .env
 # Edit .env — at minimum set OPENAI_API_KEY
 ```
 
-另外请设置 `TWILIO_ACCOUNT_SID` 和 `TWILIO_AUTH_TOKEN`，服务端才能通过 Twilio REST API 结束通话（时长上限、静音挂断）；设置 `TWILIO_PHONE_NUMBER` 后，还可以在看板里一键同步 webhook。
+然后设置：
+
+- `DASHBOARD_TOKEN`：一个足够长的随机密钥（`openssl rand -hex 32`）。看板会要求输入它；没有设置时，看板 API 和实时转写都会被禁用，而在 `NODE_ENV=production` 下服务端会拒绝启动。
+- `TWILIO_ACCOUNT_SID` 和 `TWILIO_AUTH_TOKEN`：服务端才能通过 Twilio REST API 结束通话（时长上限、静音挂断），并拒绝没有 Twilio 签名的 webhook 和媒体流请求。
+- `TWILIO_PHONE_NUMBER`：用于在看板里一键同步 webhook。
 
 ### 运行
 
@@ -202,7 +206,7 @@ https://<your-ngrok-host>.ngrok-free.app/twilio/incoming-call    (POST)
 
 ### 测试
 
-1. 在浏览器中打开 `http://localhost:5050`（看板）
+1. 在浏览器中打开 `http://localhost:5050`（看板），用 `DASHBOARD_TOKEN` 登录
 2. 用手机拨打你的 Twilio 号码
 3. 开始说话，浏览器中会实时出现转写
 4. 挂断电话，SOAP 病历会自动生成
@@ -220,7 +224,9 @@ npm test
 ```
 .
 ├── src/
-│   ├── server.js              # Express HTTP + dual WebSocket entry point
+│   ├── server.js              # Entry point: security startup check + listen
+│   ├── app.js                 # Express routes + dual WebSocket upgrade routing
+│   ├── auth.js                # Dashboard token + Twilio signature checks
 │   ├── twilio-handler.js      # TwiML, Media Streams ↔ OpenAI bridge, call hang-up
 │   ├── openai-client.js       # OpenAI Realtime WebSocket client + echo gate
 │   ├── session-manager.js     # Call session registry + transcript fan-out
@@ -256,6 +262,8 @@ npm test
 
 ## API 接口
 
+访问控制：所有 `/api/*` 接口都需要 `Authorization: Bearer <DASHBOARD_TOKEN>`（缺少时返回 401，服务端未设置令牌时返回 503）。设置了 `TWILIO_AUTH_TOKEN` 时，`/twilio/*` 请求必须带有效的 `X-Twilio-Signature`（否则返回 403）。`/health` 和看板页面本身是公开的；登录之前页面里没有任何数据。
+
 ### HTTP
 
 | 接口 | 方法 | 说明 |
@@ -275,8 +283,8 @@ npm test
 
 | 接口 | 协议 | 说明 |
 |----------|----------|-------------|
-| `/twilio/media-stream` | Twilio Media Streams | 双向通话音频 |
-| `/dashboard/ws?sessionId=<id>` | JSON 消息 | 实时转写流 |
+| `/twilio/media-stream` | Twilio Media Streams | 双向通话音频（升级请求校验 `X-Twilio-Signature`） |
+| `/dashboard/ws?sessionId=<id>` | JSON 消息 | 实时转写流（子协议 `dashboard.v1` 和 `auth.<base64url(DASHBOARD_TOKEN)>`） |
 
 ### 查询参数
 
@@ -296,6 +304,7 @@ npm test
 | 变量 | 说明 |
 |----------|-------------|
 | `OPENAI_API_KEY` | 有 Realtime API 权限的 OpenAI API key |
+| `DASHBOARD_TOKEN` | 看板和 `/api/*` 的密钥。未设置时它们被禁用（503）；在 `NODE_ENV=production` 下服务端不会启动 |
 
 ### 可选
 
@@ -308,8 +317,10 @@ npm test
 | `SPEAKER_A_LANG` | `Chinese` | 第一种语言 |
 | `SPEAKER_B_LANG` | `English` | 第二种语言 |
 | `DEFAULT_MODE` | `translator` | 默认会话模式 |
+| `NODE_ENV` | — | 设为 `production` 时，缺少 `DASHBOARD_TOKEN` 会导致启动失败 |
 | `TWILIO_ACCOUNT_SID` | — | Twilio 账号；通过 REST API 挂断通话和同步 webhook 都需要 |
-| `TWILIO_AUTH_TOKEN` | — | Twilio auth token（用途同上） |
+| `TWILIO_AUTH_TOKEN` | — | Twilio auth token：REST API（用途同上）以及 `X-Twilio-Signature` 校验 |
+| `TWILIO_SKIP_SIGNATURE_CHECK` | `false` | 仅供调试：不校验签名，直接接受 Twilio 请求 |
 | `TWILIO_PHONE_NUMBER` | — | `/api/twilio-sync` 要更新 Voice webhook 的号码（E.164） |
 | `MAX_CONCURRENT_CALLS` | `5` | 最大同时通话数 |
 | `MAX_CALL_DURATION_MIN` | `30` | N 分钟后结束通话 |
@@ -408,10 +419,11 @@ Twilio plays:   u-law 8kHz directly to phone
 | 层面 | 状态 | 说明 |
 |-------|--------|--------|
 | 审计日志 | 已实现 | 仅追加的 JSONL，记录所有数据访问 |
-| 传输加密 | 已具备 | Twilio、OpenAI 和看板均使用 WSS |
+| 传输加密 | 已具备 | Twilio、OpenAI 和看板均使用 WSS（看板请通过 HTTPS 访问，例如 ngrok 或 nginx + TLS，避免令牌明文传输） |
 | PHI 日志控制 | 已实现 | 由 `DEBUG_LOG_TRANSCRIPTS` 开关控制控制台输出 |
 | 数据生命周期 | 部分实现 | 已结束的会话在 `SESSION_TTL_MINUTES` 后从内存清除，但每个完成的会话（转写与 SOAP 病历）都会写入 `data/sessions/<id>.json`，并在启动时重新加载 |
-| 访问控制 | 仅有架构设计 | 基于 UUID 的会话访问（可接入 JWT/RBAC） |
+| 访问控制 | 已实现（单操作员） | 看板、`/api/*` 和 `/dashboard/ws` 都需要 `DASHBOARD_TOKEN`（常数时间比较，失败会写入审计日志）；浏览器只在当前标签页的 `sessionStorage` 中保存它。只有一个共享密钥，没有按用户的账号和角色 |
+| 请求真实性 | 已实现 | Voice webhook 和媒体流升级请求都用 `X-Twilio-Signature` 校验（HMAC-SHA1，`TWILIO_AUTH_TOKEN`） |
 | BAA 协议 | 不在范围内 | 生产环境必需（Twilio、OpenAI、托管服务商） |
 | 静态数据加密 | 不在范围内 | 生产部署时需补充 |
 
@@ -423,7 +435,7 @@ Twilio plays:   u-law 8kHz directly to phone
 
 ```bash
 docker build -t ai-medical-interpreter .
-docker run -p 5050:5050 --env-file .env ai-medical-interpreter
+docker run -p 5050:5050 --env-file .env -e NODE_ENV=production ai-medical-interpreter
 ```
 
 ### AWS (EC2 + nginx)
@@ -453,7 +465,7 @@ docker run -p 5050:5050 --env-file .env ai-medical-interpreter
 - [ ] **双人会议模式**：A 说中文，B 听到英文；B 说英文，A 听到中文（架构设计见 [docs/architecture.md](docs/architecture.md)）
 - [ ] **声音克隆**：通过 ElevenLabs / Cartesia 定制 TTS 音色（接口定义在 `tts-bridge.js`，路线图见 [docs/voice-cloning.md](docs/voice-cloning.md)）
 - [ ] **EHR 集成**：通过 FHIR 把 SOAP 病历推送到 Epic/Cerner
-- [ ] **用户认证**：用 JWT + RBAC 控制看板访问
+- [ ] **按用户认证**：用独立账号 + RBAC 取代单一共享的 `DASHBOARD_TOKEN`
 - [ ] **多会话监控**：管理员可查看所有进行中的通话
 - [ ] **质量评分**：通话结束后评估翻译准确度
 - [ ] **低资源语言兜底**：AI 置信度低时转接人工口译员

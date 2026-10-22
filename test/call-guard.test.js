@@ -114,3 +114,14 @@ test('speech resets the silence timer and re-arms the warning', () => {
   unregisterCall('CA-silence-2');
   assert.deepEqual(actions, ['warn_silence', 'warn_silence']);
 });
+
+test('near-zero samples of either sign count as silence', () => {
+  // Low-level line noise alternating around zero: +0, -0, +1, -1 in μ-law.
+  const noiseFloor = Buffer.from(Array.from({ length: 160 }, (_, i) => [0xFF, 0x7F, 0xFE, 0x7E][i % 4])).toString('base64');
+  registerCall('CA-noise', '+15550000009');
+  const actions = feed('CA-noise', noiseFloor, chunksFor(config.maxSilenceDurationSec * 1.5));
+  const loud = feed('CA-noise', ulawChunk(0x00), 1); // full-scale negative sample
+  unregisterCall('CA-noise');
+  assert.deepEqual(actions, ['warn_silence']);
+  assert.deepEqual(loud, []);
+});

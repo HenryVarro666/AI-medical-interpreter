@@ -104,13 +104,16 @@ export function trackAudioChunk(callSid, payload) {
   return { action: 'continue' };
 }
 
+// G.711 μ-law bytes are inverted sign + magnitude: 0xFF is +0 and 0x7F is -0,
+// so a sample's distance from zero is 0x7F minus its low 7 bits, whatever the
+// sign. (Measuring from 0xFF alone made every near-zero negative sample look
+// loud, so a noise floor that straddles zero never counted as silence.)
 function isChunkSilent(base64Payload) {
   const buf = Buffer.from(base64Payload, 'base64');
+  if (buf.length === 0) return false;
   let energy = 0;
   for (let i = 0; i < buf.length; i++) {
-    const sample = buf[i];
-    const deviation = Math.abs(sample - 0xFF);
-    energy += deviation;
+    energy += 0x7F - (buf[i] & 0x7F);
   }
   return (energy / buf.length) < 3;
 }

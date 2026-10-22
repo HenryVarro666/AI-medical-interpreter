@@ -33,8 +33,11 @@ export function checkCallAllowed(callSid, callerNumber) {
  * @param {string} callSid  Twilio CallSid (StreamSid if Twilio sent none)
  * @param {string} callerNumber  Twilio `From`, passed to the media stream as
  *   the `from` <Parameter>; must match what checkCallAllowed() was given
+ * @param {{ onMaxDuration?: () => void | Promise<void> }} [hooks]
+ *   onMaxDuration is called once MAX_CALL_DURATION_MIN has passed; it must
+ *   actually end the call (call-guard only tracks it).
  */
-export function registerCall(callSid, callerNumber) {
+export function registerCall(callSid, callerNumber, { onMaxDuration } = {}) {
   const now = Date.now();
   const timer = setTimeout(() => {
     forceEndCall(callSid);
@@ -44,6 +47,7 @@ export function registerCall(callSid, callerNumber) {
     callerNumber,
     startedAt: now,
     timer,
+    onMaxDuration,
     silentChunks: 0,
     totalChunks: 0,
   });
@@ -102,13 +106,21 @@ function isChunkSilent(base64Payload) {
 
 function forceEndCall(callSid) {
   const entry = activeCalls.get(callSid);
-  if (entry) {
-    logAudit('call_force_ended', null, entry.callerNumber, {
-      reason: 'max_duration',
-      durationMs: Date.now() - entry.startedAt,
-    });
-    unregisterCall(callSid);
+  if (!entry) return;
+
+  logAudit('call_force_ended', null, entry.callerNumber, {
+    reason: 'max_duration',
+    durationMs: Date.now() - entry.startedAt,
+  });
+  unregisterCall(callSid);
+
+  if (!entry.onMaxDuration) {
+    console.warn(`[call-guard] ${callSid} reached max duration but has no handler to end it`);
+    return;
   }
+  Promise.resolve()
+    .then(() => entry.onMaxDuration())
+    .catch(err => console.error(`[call-guard] ending ${callSid} failed:`, err?.message || err));
 }
 
 export function getCallStats() {

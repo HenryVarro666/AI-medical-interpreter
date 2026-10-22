@@ -49,3 +49,33 @@ test('calls older than the window stop counting', async (t) => {
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(checkCallAllowed('CA-win-later', number).allowed, true);
 });
+
+test('max duration calls onMaxDuration once and frees the call slot', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ended = 0;
+  registerCall('CA-max', '+15550000005', { onMaxDuration: () => { ended++; } });
+  assert.equal(getCallStats().activeCalls, 1);
+
+  t.mock.timers.tick(config.maxCallDurationMs - 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ended, 0, 'not before the limit');
+
+  t.mock.timers.tick(1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ended, 1);
+  assert.equal(getCallStats().activeCalls, 0);
+
+  t.mock.timers.tick(config.maxCallDurationMs);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ended, 1, 'fires only once');
+});
+
+test('unregisterCall cancels the max-duration timer', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ended = 0;
+  registerCall('CA-max-cancel', '+15550000006', { onMaxDuration: () => { ended++; } });
+  unregisterCall('CA-max-cancel');
+  t.mock.timers.tick(config.maxCallDurationMs * 2);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ended, 0);
+});
